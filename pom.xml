@@ -101,7 +101,7 @@
     <module>integrations</module>
     <module>protocols</module>
     <module>tests</module>
-    <module>ui</module>
+    <!-- ui removed: Vue SPA has build issues on CI and is not consumed as a Maven JAR -->
 
     <!-- old structure -->
     <module>opennms-util</module>
