@@ -1,0 +1,330 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-2.0.xsd">
+
+    <changeSet id="36.0.0-add-alarm-event-denormalization" author="opennms">
+        <comment>Denormalize event data onto alarms for Kafka-backed event pipeline</comment>
+
+        <addColumn tableName="alarms">
+            <column name="event_tsid" type="BIGINT"/>
+            <column name="event_uei" type="VARCHAR(256)"/>
+            <column name="event_source" type="VARCHAR(256)"/>
+            <column name="event_severity" type="INTEGER"/>
+            <column name="event_timestamp" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="event_node_id" type="BIGINT"/>
+            <column name="event_log_msg" type="TEXT"/>
+            <column name="last_event_data" type="TEXT"/>
+        </addColumn>
+
+        <createIndex tableName="alarms" indexName="idx_alarms_event_tsid">
+            <column name="event_tsid"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="36.0.0-backfill-alarm-event-data" author="opennms">
+        <comment>Backfill denormalized event data from existing events table</comment>
+        <sql>
+            UPDATE alarms a SET
+                event_tsid = e.eventid,
+                event_uei = e.eventuei,
+                event_source = e.eventsource,
+                event_severity = e.eventseverity,
+                event_timestamp = e.eventtime,
+                event_node_id = e.nodeid,
+                event_log_msg = e.eventlogmsg
+            FROM events e
+            WHERE a.lasteventid = e.eventid
+              AND a.event_tsid IS NULL;
+        </sql>
+    </changeSet>
+
+    <changeSet id="36.0.0-drop-alarm-event-fk" author="opennms">
+        <comment>Drop FK, index, and lasteventid column from alarms — events move to Kafka.
+            Must drop node_alarms view first since it depends on lasteventid.</comment>
+        <dropView viewName="node_alarms"/>
+        <dropForeignKeyConstraint baseTableName="alarms"
+                                  constraintName="fk_eventidak2"/>
+        <dropIndex tableName="alarms" indexName="alarm_eventid_idx"/>
+        <dropColumn tableName="alarms" columnName="lasteventid"/>
+
+        <createView replaceIfExists="true" viewName="node_alarms">
+                SELECT
+                n.nodeid,
+                n.nodecreatetime,
+                n.nodeparentid,
+                n.nodetype,
+                n.nodesysoid,
+                n.nodesysname,
+                n.nodesysdescription,
+                n.nodesyslocation,
+                n.nodesyscontact,
+                n.nodelabel,
+                n.nodelabelsource,
+                n.nodenetbiosname,
+                n.nodedomainname,
+                n.operatingsystem,
+                n.lastcapsdpoll,
+                n.foreignsource,
+                n.foreignid,
+                n.location,
+                a.alarmid,
+                a.eventuei,
+                a.ipaddr,
+                a.reductionkey,
+                a.alarmtype,
+                a.counter,
+                a.severity,
+                a.firsteventtime,
+                a.lasteventtime,
+                a.firstautomationtime,
+                a.lastautomationtime,
+                a.description,
+                a.logmsg,
+                a.operinstruct,
+                a.tticketid,
+                a.tticketstate,
+                a.suppresseduntil,
+                a.suppresseduser,
+                a.suppressedtime,
+                a.alarmackuser,
+                a.alarmacktime,
+                a.managedobjectinstance,
+                a.managedobjecttype,
+                a.applicationdn,
+                a.ossprimarykey,
+                a.x733alarmtype,
+                a.qosalarmstate,
+                a.clearkey,
+                a.ifindex,
+                a.stickymemo,
+                a.systemid,
+                (a.alarmacktime NOTNULL) AS acknowledged,
+                COALESCE(s_cat.categoryname, 'no category') AS categoryname,
+                s_cat.categorydescription,
+                s.servicename,
+                nas.max_alarm_severity,
+                nas.max_alarm_severity_unack,
+                nas.alarm_count_unack,
+                nas.alarm_count
+                FROM
+                node n
+                JOIN
+                alarms a
+                ON
+                n.nodeid = a.nodeid
+                JOIN
+                node_alarm_status nas
+                ON
+                a.nodeid = nas.nodeid
+                LEFT JOIN
+                service s
+                ON
+                a.serviceid = s.serviceid
+                LEFT JOIN
+                category_node cat
+                ON
+                n.nodeid = cat.nodeid
+                LEFT JOIN
+                categories s_cat
+                ON
+                cat.categoryid = s_cat.categoryid
+        </createView>
+    </changeSet>
+
+    <changeSet id="36.0.0-drop-events-table" author="opennms">
+        <comment>Remove events table — events are now stored in Kafka</comment>
+        <dropTable tableName="events" cascadeConstraints="true"/>
+        <sql>DROP SEQUENCE IF EXISTS eventsnxtid;</sql>
+    </changeSet>
+
+    <changeSet id="36.0.0-recreate-outage-views-without-events" author="opennms">
+        <comment>Recreate node_outage_status and node_outages views without events table.
+            The CASCADE on DROP TABLE events removed these views. They now use
+            hardcoded severity 5 (Major) for outages since events are in Kafka.</comment>
+
+        <createView replaceIfExists="true" viewName="node_outage_status">
+          SELECT
+            node.nodeid,
+            (CASE WHEN severity IS NULL OR severity &lt; 3 THEN 3 ELSE severity END) AS max_outage_severity
+          FROM
+            (
+              SELECT ipif.nodeid, max(5) AS severity
+              FROM outages
+              JOIN ifservices ifs ON outages.ifserviceid = ifs.id
+              JOIN ipinterface ipif ON ifs.ipinterfaceid = ipif.id
+              WHERE outages.ifregainedservice IS NULL AND outages.perspective IS NULL
+              GROUP BY ipif.nodeid
+            ) AS tmp
+          RIGHT JOIN node ON tmp.nodeid = node.nodeid
+        </createView>
+
+        <createView replaceIfExists="true" viewName="node_outages">
+            SELECT
+              outages.outageid,
+              outages.svclosteventid,
+              outages.svcregainedeventid,
+              outages.iflostservice,
+              outages.ifregainedservice,
+              outages.ifserviceid,
+              'uei.opennms.org/nodes/nodeLostService' AS svclosteventuei,
+              NULL AS eventsource,
+              5 AS eventseverity,
+              (outages.ifregainedservice IS NOT NULL) AS resolved,
+              s.servicename,
+              ifs.serviceid,
+              ipif.ipaddr,
+              COALESCE(outages.ifregainedservice - outages.iflostservice, now() - outages.iflostservice) AS duration,
+              nos.max_outage_severity,
+              nc.*
+            FROM
+              outages
+            JOIN ifservices ifs ON outages.ifserviceid = ifs.id
+            JOIN service s ON ifs.serviceid = s.serviceid
+            JOIN ipinterface ipif ON ifs.ipinterfaceid = ipif.id
+            JOIN node_categories nc ON ipif.nodeid = nc.nodeid
+            JOIN node_outage_status nos ON nc.nodeid = nos.nodeid
+            WHERE outages.perspective IS NULL
+        </createView>
+    </changeSet>
+
+    <changeSet author="delta-v" id="36.0.0-drop-device-config">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="device_config"/>
+        </preConditions>
+        <dropTable tableName="device_config" cascadeConstraints="true"/>
+        <rollback/>
+    </changeSet>
+
+    <changeSet author="delta-v" id="36.0.0-drop-device-config-sequence">
+        <preConditions onFail="MARK_RAN">
+            <sequenceExists sequenceName="deviceconfignxtid"/>
+        </preConditions>
+        <dropSequence sequenceName="deviceconfignxtid"/>
+        <rollback/>
+    </changeSet>
+
+    <changeSet author="delta-v" id="36.0.0-drop-statisticsreportdata">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="statisticsreportdata"/>
+        </preConditions>
+        <dropTable tableName="statisticsreportdata" cascadeConstraints="true"/>
+        <rollback/>
+    </changeSet>
+
+    <changeSet author="delta-v" id="36.0.0-drop-statisticsreport">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="statisticsreport"/>
+        </preConditions>
+        <dropTable tableName="statisticsreport" cascadeConstraints="true"/>
+        <rollback/>
+    </changeSet>
+
+    <changeSet author="delta-v" id="36.0.0-drop-reportlocator">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="reportlocator"/>
+        </preConditions>
+        <dropTable tableName="reportlocator" cascadeConstraints="true"/>
+        <rollback/>
+    </changeSet>
+
+    <changeSet author="delta-v" id="36.0.0-drop-reportcatalog">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="reportcatalog"/>
+        </preConditions>
+        <dropTable tableName="reportcatalog" cascadeConstraints="true"/>
+        <rollback/>
+    </changeSet>
+
+    <changeSet id="36.0.0-add-outage-event-denormalization" author="delta-v">
+        <comment>Denormalize event data onto outages — events table is gone, FK columns are orphaned</comment>
+
+        <addColumn tableName="outages">
+            <column name="svc_lost_event_tsid" type="BIGINT"/>
+            <column name="svc_lost_event_uei" type="VARCHAR(256)"/>
+            <column name="svc_regained_event_tsid" type="BIGINT"/>
+            <column name="svc_regained_event_uei" type="VARCHAR(256)"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="36.0.0-drop-outage-event-fk-columns" author="delta-v">
+        <comment>Drop orphaned FK columns — events table was dropped with cascadeConstraints</comment>
+
+        <dropView viewName="node_outages"/>
+
+        <dropColumn tableName="outages" columnName="svclosteventid"/>
+        <dropColumn tableName="outages" columnName="svcregainedeventid"/>
+
+        <createView replaceIfExists="true" viewName="node_outages">
+            SELECT
+              outages.outageid,
+              outages.svc_lost_event_tsid,
+              outages.svc_lost_event_uei,
+              outages.svc_regained_event_tsid,
+              outages.svc_regained_event_uei,
+              outages.iflostservice,
+              outages.ifregainedservice,
+              outages.ifserviceid,
+              5 AS eventseverity,
+              (outages.ifregainedservice IS NOT NULL) AS resolved,
+              s.servicename,
+              ifs.serviceid,
+              ipif.ipaddr,
+              COALESCE(outages.ifregainedservice - outages.iflostservice, now() - outages.iflostservice) AS duration,
+              nos.max_outage_severity,
+              nc.*
+            FROM
+              outages
+            JOIN ifservices ifs ON outages.ifserviceid = ifs.id
+            JOIN service s ON ifs.serviceid = s.serviceid
+            JOIN ipinterface ipif ON ifs.ipinterfaceid = ipif.id
+            JOIN node_categories nc ON ipif.nodeid = nc.nodeid
+            JOIN node_outage_status nos ON nc.nodeid = nos.nodeid
+            WHERE outages.perspective IS NULL
+        </createView>
+    </changeSet>
+
+    <changeSet id="36.0.0-drop-notifications-tables" author="delta-v">
+        <comment>Drop notification tables — Notifd daemon eliminated from Delta-V</comment>
+        <dropTable tableName="usersnotified" cascadeConstraints="true"/>
+        <dropTable tableName="notifications" cascadeConstraints="true"/>
+        <sql>DROP SEQUENCE IF EXISTS notifynxtid;</sql>
+    </changeSet>
+
+    <changeSet id="36.0.0-drop-event-parameters-table" author="delta-v">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="event_parameters"/>
+        </preConditions>
+        <comment>Drop orphaned event_parameters table — parent events table was dropped but cascadeConstraints only removed FKs, not child tables</comment>
+        <dropTable tableName="event_parameters" cascadeConstraints="true"/>
+    </changeSet>
+
+    <changeSet id="36.0.0-bsm-edge-type-discriminator" author="delta-v">
+        <comment>Add type discriminator column to bsm_service_edge for JPA JOINED inheritance.
+            Old Hibernate 3.6 inferred subclass type from joined tables; Jakarta Persistence requires
+            an explicit discriminator column. Backfill from the joined subclass tables.</comment>
+
+        <addColumn tableName="bsm_service_edge">
+            <column name="type" type="VARCHAR(255)"/>
+        </addColumn>
+
+        <sql>
+            UPDATE bsm_service_edge SET type = 'ipservices'
+            WHERE id IN (SELECT id FROM bsm_service_ifservices);
+
+            UPDATE bsm_service_edge SET type = 'children'
+            WHERE id IN (SELECT id FROM bsm_service_children);
+
+            UPDATE bsm_service_edge SET type = 'reductionkeys'
+            WHERE id IN (SELECT id FROM bsm_service_reductionkeys);
+
+            UPDATE bsm_service_edge SET type = 'applications'
+            WHERE id IN (SELECT id FROM bsm_service_applications);
+        </sql>
+
+        <addNotNullConstraint tableName="bsm_service_edge" columnName="type" columnDataType="VARCHAR(255)"/>
+    </changeSet>
+
+</databaseChangeLog>

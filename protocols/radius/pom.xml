@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <parent>
+    <groupId>org.opennms</groupId>
+    <artifactId>org.opennms.protocols</artifactId>
+    <version>1.0.0</version>
+  </parent>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.opennms.protocols</groupId>
+  <artifactId>org.opennms.protocols.radius</artifactId>
+  <name>OpenNMS :: Protocols :: RADIUS</name>
+  <description>
+    This module adds RADIUS support to OpenNMS.
+  </description>
+<dependencies>
+    <dependency>
+      <groupId>org.opennms</groupId>
+      <artifactId>opennms-provision-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.opennms</groupId>
+      <artifactId>opennms-web-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.opennms.features.poller.monitors</groupId>
+      <artifactId>org.opennms.features.poller.monitors.core</artifactId>
+      <type>jar</type>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.opennms.dependencies</groupId>
+      <artifactId>jradius-dependencies</artifactId>
+      <type>pom</type>
+    </dependency>
+    <dependency>
+      <!-- This adds support for MD4 digest used by mschapv2 - NMS-9763 -->
+      <groupId>org.opennms.dependencies</groupId>
+      <artifactId>jcifs-dependencies</artifactId>
+      <type>pom</type>
+    </dependency>
+    <dependency>
+      <groupId>org.opennms.core.test-api</groupId>
+      <artifactId>org.opennms.core.test-api.services</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.opennms</groupId>
+      <artifactId>opennms-dao-mock</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.hynnet</groupId>
+      <artifactId>tinyradius</artifactId>
+      <version>1.0.1</version>
+      <scope>test</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>commons-logging</groupId>
+          <artifactId>commons-logging</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+  </dependencies>
+</project>

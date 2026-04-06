@@ -1,0 +1,91 @@
+
+= Enable the Kafka Producer
+:description: Learn how to enable the Kafka Producer to let {page-component-title} forward events, alarms, nodes, topologies, and metrics to Kafka.
+
+The Kafka Producer is disabled by default and can be enabled as follows.
+
+First, log in to the Karaf shell of your {page-component-title} instance and configure the Kafka client settings to point to your Kafka server(s).
+See link:https://kafka.apache.org/documentation/#producerconfigs[Producer Configs] for a complete list of available options.
+
+.Connect to Karaf shell
+[source, console]
+----
+ssh -p 8101 admin@localhost
+----
+
+.Configure the Kafka producer client
+[source, karaf]
+----
+config:edit org.opennms.features.kafka.producer.client
+config:property-set bootstrap.servers kafka-server-ip:9092 <1>
+config:update
+----
+<1> Set the Kafka server IP or hostname by replacing the kafka-server-ip and port of an existing Kafka cluster that you want to connect to.
+    Add multiple hosts in a comma-separated list; for example, `kafka-server-1:9092,kafka-server-2:9092`
+
+
+== Per-Topic Kafka Configuration
+For advanced deployments, you can configure different Kafka clusters for different types of messages. This allows you to send events to one set of Kafka servers, alarms to another set, and metrics to yet another set.
+The following configuration PIDs are available for per-topic configuration:
+
+|===
+| Message Type | Configuration PID
+
+| Events
+| `org.opennms.features.kafka.producer.client.events`
+
+| Alarms
+| `org.opennms.features.kafka.producer.client.alarms`
+
+| Metrics
+| `org.opennms.features.kafka.producer.client.metrics`
+
+| Nodes
+| `org.opennms.features.kafka.producer.client.nodes`
+
+| Topology (vertices and edges)
+| `org.opennms.features.kafka.producer.client.topology`
+
+| Alarm Feedback
+| `org.opennms.features.kafka.producer.client.alarmFeedback`
+|===
+
+If a topic-specific PID configuration does not exist or does not have `bootstrap.servers` configured, the system will fall back to the global configuration (`org.opennms.features.kafka.producer.client`).
+
+.Configure events to go to a specific Kafka cluster
+[source, karaf]
+----
+config:edit org.opennms.features.kafka.producer.client.events
+config:property-set bootstrap.servers events-kafka:9092
+config:update
+----
+.Configure alarms to go to a different Kafka cluster
+[source, karaf]
+----
+config:edit org.opennms.features.kafka.producer.client.alarms
+config:property-set bootstrap.servers alarms-kafka:9092
+config:update
+----
+
+.Configure metrics to use a dedicated Kafka cluster
+[source, karaf]
+----
+config:edit org.opennms.features.kafka.producer.client.metrics
+config:property-set bootstrap.servers metrics-kafka:9092
+config:update
+----
+
+Next, install the `opennms-kafka-producer` feature from that same shell using:
+
+[source, karaf]
+----
+feature:install opennms-kafka-producer
+----
+
+To ensure that the feature continues to be installed on subsequent restarts, add `opennms-kafka-producer` to a file in `featuresBoot.d`:
+[source, console]
+----
+echo "opennms-kafka-producer" | sudo tee ${OPENNMS_HOME}/etc/featuresBoot.d/kafka-producer.boot
+----
+
+NOTE: Whenever configuration is updated at runtime, the feature must be stopped and restarted.

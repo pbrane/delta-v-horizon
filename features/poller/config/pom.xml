@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <parent>
+    <groupId>org.opennms.features</groupId>
+    <artifactId>org.opennms.features.poller</artifactId>
+    <version>1.0.0</version>
+  </parent>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.opennms.features.poller</groupId>
+  <artifactId>org.opennms.features.poller.config</artifactId>
+  <name>OpenNMS :: Features :: Poller :: Config</name>
+  <dependencies>
+    <!-- Poller API (ServiceMonitor, ServiceMonitorLocator, ServiceMonitorRegistry) -->
+    <dependency>
+      <groupId>org.opennms.features.poller</groupId>
+      <artifactId>org.opennms.features.poller.api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- Config API (FilterDao interface, PathOutageConfig) -->
+    <dependency>
+      <groupId>org.opennms</groupId>
+      <artifactId>opennms-config-api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- Config JAXB model (PollerConfiguration, Package, Service, etc.) -->
+    <dependency>
+      <groupId>org.opennms</groupId>
+      <artifactId>opennms-config-jaxb</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- Model API (ServiceSelector) -->
+    <dependency>
+      <groupId>org.opennms.core</groupId>
+      <artifactId>org.opennms.core.model-api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- Core lib (IpListFromUrl, InetAddressUtils, ByteArrayComparator) -->
+    <dependency>
+      <groupId>org.opennms.core</groupId>
+      <artifactId>org.opennms.core.lib</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- ConfigFileConstants -->
+    <dependency>
+      <groupId>org.opennms</groupId>
+      <artifactId>opennms-util</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- Jackson XmlMapper -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.dataformat</groupId>
+      <artifactId>jackson-dataformat-xml</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.module</groupId>
+      <artifactId>jackson-module-jaxb-annotations</artifactId>
+    </dependency>
+
+    <!-- Guava -->
+    <dependency>
+      <groupId>com.google.guava</groupId>
+      <artifactId>guava</artifactId>
+    </dependency>
+
+    <!-- Commons -->
+    <dependency>
+      <groupId>commons-io</groupId>
+      <artifactId>commons-io</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>commons-collections</groupId>
+      <artifactId>commons-collections</artifactId>
+    </dependency>
+
+    <!-- Logging -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+  </dependencies>
+</project>

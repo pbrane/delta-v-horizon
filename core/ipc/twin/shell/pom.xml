@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <artifactId>org.opennms.core.ipc.twin</artifactId>
+        <groupId>org.opennms.core.ipc</groupId>
+        <version>1.0.0</version>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>org.opennms.core.ipc.twin</groupId>
+    <artifactId>org.opennms.core.ipc.twin.shell</artifactId>
+    <name>OpenNMS :: Core :: IPC :: Twin :: Shell</name>
+<dependencies>
+        <dependency>
+            <groupId>org.opennms.core.ipc.twin</groupId>
+            <artifactId>org.opennms.core.ipc.twin.api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.opennms.features.telemetry.protocols.netflow</groupId>
+            <artifactId>org.opennms.features.telemetry.protocols.netflow.parser</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.karaf.shell</groupId>
+            <artifactId>org.apache.karaf.shell.core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.osgi</groupId>
+            <artifactId>osgi.enterprise</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.opennms.core.snmp</groupId>
+            <artifactId>org.opennms.core.snmp.api</artifactId>
+        </dependency>
+    </dependencies>
+</project>

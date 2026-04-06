@@ -1,0 +1,257 @@
+/*
+ * Licensed to The OpenNMS Group, Inc (TOG) under one or more
+ * contributor license agreements.  See the LICENSE.md file
+ * distributed with this work for additional information
+ * regarding copyright ownership.
+ *
+ * TOG licenses this file to You under the GNU Affero General
+ * Public License Version 3 (the "License") or (at your option)
+ * any later version.  You may not use this file except in
+ * compliance with the License.  You may obtain a copy of the
+ * License at:
+ *
+ *      https://www.gnu.org/licenses/agpl-3.0.txt
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied.  See the License for the specific
+ * language governing permissions and limitations under the
+ * License.
+ */
+package org.opennms.web.svclayer.support;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+
+import org.opennms.netmgt.dao.api.GraphDao;
+import org.opennms.netmgt.dao.api.ResourceDao;
+import org.opennms.netmgt.model.OnmsNode;
+import org.opennms.netmgt.model.OnmsResource;
+import org.opennms.netmgt.model.PrefabGraph;
+import org.opennms.netmgt.model.ResourceId;
+import org.opennms.netmgt.model.ResourceTypeUtils;
+import org.opennms.web.api.Util;
+import org.opennms.web.svclayer.api.ResourceService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.InitializingBean;
+import org.springframework.util.Assert;
+
+/**
+ * <p>DefaultResourceService class.</p>
+ *
+ * @author <a href="mailto:dj@opennms.org">DJ Gregor</a>
+ * @author <a href="mailto:brozow@opennms.org">Mathew Brozowski</a>
+ */
+public class DefaultResourceService implements ResourceService, InitializingBean {
+	
+	private static final Logger LOG = LoggerFactory.getLogger(DefaultResourceService.class);
+
+    private ResourceDao m_resourceDao;
+    private GraphDao m_graphDao;
+
+    /**
+     * <p>getResourceDao</p>
+     *
+     * @return a {@link org.opennms.netmgt.dao.api.ResourceDao} object.
+     */
+    public ResourceDao getResourceDao() {
+        return m_resourceDao;
+    }
+
+    /**
+     * <p>setResourceDao</p>
+     *
+     * @param resourceDao a {@link org.opennms.netmgt.dao.api.ResourceDao} object.
+     */
+    public void setResourceDao(ResourceDao resourceDao) {
+        m_resourceDao = resourceDao;
+    }
+    
+    /**
+     * <p>getGraphDao</p>
+     *
+     * @return a {@link org.opennms.netmgt.dao.api.GraphDao} object.
+     */
+    public GraphDao getGraphDao() {
+        return m_graphDao;
+    }
+
+    /**
+     * <p>setGraphDao</p>
+     *
+     * @param graphDao a {@link org.opennms.netmgt.dao.api.GraphDao} object.
+     */
+    public void setGraphDao(GraphDao graphDao) {
+        m_graphDao = graphDao;
+    }
+    
+    /**
+     * <p>afterPropertiesSet</p>
+     *
+     * @throws java.lang.Exception if any.
+     */
+    @Override
+    public void afterPropertiesSet() throws Exception {
+        Assert.state(m_resourceDao != null, "resourceDao property is not set");
+        Assert.state(m_graphDao != null, "graphDao property is not set");
+    }
+
+    /**
+     * <p>findTopLevelResources</p>
+     *
+     * @return a {@link java.util.List} object.
+     */
+    @Override
+    public List<OnmsResource> findTopLevelResources() {
+        return m_resourceDao.findTopLevelResources();
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public List<OnmsResource> findNodeChildResources(OnmsNode node) {
+        List<OnmsResource> resources = new ArrayList<>();
+        if (node != null) {
+            if (ResourceTypeUtils.isStoreByForeignSource() && node.getForeignSource() != null) {
+                String source = node.getForeignSource() + ':' + node.getForeignId();
+                resources.addAll(findNodeSourceChildResources(source));
+            } else {
+                resources.addAll(findNodeChildResources(node.getId()));
+            }
+        }
+        return resources;
+    }
+
+    /** {@inheritDoc} */
+    public List<OnmsResource> findNodeChildResources(int nodeId) {
+        List<OnmsResource> resources = new ArrayList<>();
+        OnmsResource resource = m_resourceDao.getResourceById(ResourceId.get("node", Integer.toString(nodeId)));
+        if (resource != null) {
+            resources = resource.getChildResources();
+            resources.size(); // Get the size to force the list to be loaded
+        }
+        return resources;
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public List<OnmsResource> findDomainChildResources(String domain) {
+        List<OnmsResource> resources = new ArrayList<>();
+        OnmsResource resource = m_resourceDao.getResourceById(ResourceId.get("domain", domain));
+        if (resource != null) {
+            resources = resource.getChildResources();
+            resources.size(); // Get the size to force the list to be loaded
+        }
+        return resources;
+    }
+    
+    /** {@inheritDoc} */
+    @Override
+    public List<OnmsResource> findNodeSourceChildResources(String nodeSource) {
+        List<OnmsResource> resources = new ArrayList<>();
+        OnmsResource resource = m_resourceDao.getResourceById(ResourceId.get("nodeSource", nodeSource));
+        if (resource != null) {
+            resources = resource.getChildResources();
+            resources.size(); // Get the size to force the list to be loaded
+        }
+        return resources;
+    }
+    
+    /**
+     * <p>findChildResources</p>
+     *
+     * @param resource a {@link org.opennms.netmgt.model.OnmsResource} object.
+     * @param resourceTypeMatches a {@link java.lang.String} object.
+     * @return a {@link java.util.List} object.
+     */
+    @Override
+    public List<OnmsResource> findChildResources(OnmsResource resource, String... resourceTypeMatches) {
+        List<OnmsResource> matchingChildResources = new LinkedList<>();
+        
+        if (resource != null) {
+            for (OnmsResource childResource : resource.getChildResources()) {
+                boolean addGraph = false;
+                if (resourceTypeMatches.length > 0) {
+                    for (String resourceTypeMatch : resourceTypeMatches) {
+                        if (resourceTypeMatch.equals(childResource.getResourceType().getName())) {
+                            addGraph = true;
+                            break;
+                        }
+                    }
+                } else {
+                    addGraph = true;
+                }
+            
+                if (addGraph) {
+                    matchingChildResources.add(checkLabelForQuotes(childResource));
+                }
+            }
+        }
+
+        return matchingChildResources;
+    }
+
+    private static OnmsResource checkLabelForQuotes(OnmsResource childResource) {
+        
+        String lbl  = Util.convertToJsSafeString(childResource.getLabel());
+        
+        OnmsResource resource = new OnmsResource(childResource.getName(), lbl, childResource.getResourceType(), childResource.getAttributes(), childResource.getPath());
+        resource.setParent(childResource.getParent());
+        resource.setEntity(childResource.getEntity());
+        resource.setLink(childResource.getLink());
+        return resource;
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public OnmsResource getResourceById(ResourceId id) {
+        return m_resourceDao.getResourceById(id);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public PrefabGraph[] findPrefabGraphsForResource(OnmsResource resource) {
+        return m_graphDao.getPrefabGraphsForResource(resource);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void promoteGraphAttributesForResource(OnmsResource resource) {
+        // No-op: Queued daemon has been removed; RRD queue promotion is no longer needed.
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void promoteGraphAttributesForResource(ResourceId resourceId) {
+        // No-op: Queued daemon has been removed; RRD queue promotion is no longer needed.
+    }
+
+    /**
+     * <p>findPrefabGraphsForChildResources</p>
+     *
+     * @param resource a {@link org.opennms.netmgt.model.OnmsResource} object.
+     * @param resourceTypeMatches a {@link java.lang.String} object.
+     * @return an array of {@link org.opennms.netmgt.model.PrefabGraph} objects.
+     */
+    @Override
+    public PrefabGraph[] findPrefabGraphsForChildResources(OnmsResource resource, String... resourceTypeMatches) {
+        Map<String, PrefabGraph> childGraphs = new LinkedHashMap<String, PrefabGraph>();
+        for (OnmsResource r : findChildResources(resource, resourceTypeMatches)) {
+            for (PrefabGraph g : findPrefabGraphsForResource(r)) {
+                childGraphs.put(g.getName(), g);
+            }
+        }
+        return childGraphs.values().toArray(new PrefabGraph[childGraphs.size()]);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public PrefabGraph getPrefabGraph(String name) {
+        return m_graphDao.getPrefabGraph(name);
+    }
+
+}

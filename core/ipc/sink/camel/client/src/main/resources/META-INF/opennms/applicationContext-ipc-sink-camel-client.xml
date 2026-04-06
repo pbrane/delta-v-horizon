@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:context="http://www.springframework.org/schema/context"
+  xmlns:onmsgi="http://xmlns.opennms.org/xsd/spring/onms-osgi"
+  xsi:schemaLocation="
+  http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-4.2.xsd
+  http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-4.2.xsd
+  http://xmlns.opennms.org/xsd/spring/onms-osgi http://xmlns.opennms.org/xsd/spring/onms-osgi.xsd
+">
+
+  <context:annotation-config />
+
+  <bean id="camelLocalMessageDispatcherFactory"
+        class="org.opennms.core.ipc.sink.camel.client.CamelLocalMessageDispatcherFactory">
+    <property name="metrics" ref="camelSinkMetricRegistry"/>
+  </bean>
+
+  <onmsgi:service ref="camelLocalMessageDispatcherFactory" interface="org.opennms.core.ipc.sink.api.MessageDispatcherFactory" />
+
+  <!-- Sink Metrics -->
+  <bean id="camelSinkMetricRegistry" class="com.codahale.metrics.MetricRegistry"/>
+  <onmsgi:service ref="camelSinkMetricRegistry" interface="com.codahale.metrics.MetricSet" >
+    <onmsgi:service-properties>
+      <entry>
+        <key><value>name</value></key>
+        <value>Camel Sink Producer</value>
+      </entry>
+      <entry>
+        <key><value>description</value></key>
+        <value>Sink Producer Metrics on OpenNMS</value>
+      </entry>
+    </onmsgi:service-properties>
+  </onmsgi:service>
+
+</beans>

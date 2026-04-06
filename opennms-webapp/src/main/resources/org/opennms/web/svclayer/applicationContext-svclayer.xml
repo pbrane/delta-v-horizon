@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xmlns:tx="http://www.springframework.org/schema/tx" 
+xmlns:context="http://www.springframework.org/schema/context"
+xmlns:onmsgi="http://xmlns.opennms.org/xsd/spring/onms-osgi" 
+xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-4.2.xsd
+        http://www.springframework.org/schema/tx http://www.springframework.org/schema/tx/spring-tx-4.2.xsd
+        http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-4.2.xsd
+        http://xmlns.opennms.org/xsd/spring/onms-osgi http://xmlns.opennms.org/xsd/spring/onms-osgi.xsd
+">
+  <tx:annotation-driven/>
+  <context:annotation-config/>
+
+  <bean id="propertyPlaceholderConfigurer" class="org.springframework.beans.factory.config.PropertyPlaceholderConfigurer">
+    <property name="systemPropertiesModeName" value="SYSTEM_PROPERTIES_MODE_OVERRIDE" />
+    <!-- 
+      We need to ignore unresolvable placeholders since if multiple PropertyPlaceholderConfigurer
+      preprocessors are in use in a single context (such as inside unit tests), Spring will encounter
+      the issue documented here:
+
+      https://jira.springsource.org/browse/SPR-6428
+
+      TODO: Fix this behavior after upgrading to Spring 3.1.
+    -->
+    <property name="ignoreUnresolvablePlaceholders" value="true"/>
+    <property name="properties">
+      <props>
+        <prop key="importer.foreign-source.dir">${opennms.home}/etc/foreign-sources</prop>
+        <prop key="importer.requisition.dir">${opennms.home}/etc/imports</prop>
+      </props>
+    </property>
+  </bean>
+
+  <bean name="filterService" class="org.opennms.web.services.FilterFavoriteService"/>
+  <bean name="groupService" class="org.opennms.web.svclayer.support.DefaultGroupService"/>
+  <bean name="alarmRepository" class="org.opennms.netmgt.dao.hibernate.AlarmRepositoryHibernate"/>
+  <bean name="webOutageRepository" class="org.opennms.web.outage.DaoWebOutageRepository"/>
+  <bean name="webGroupRepository" class="org.opennms.web.group.DefaultWebGroupRepository">
+  </bean>
+  <!-- Surveillance View beans -->
+  <bean id="surveillanceService" class="org.opennms.web.svclayer.support.DefaultSurveillanceService">
+    <property name="nodeDao" ref="nodeDao"/>
+    <property name="categoryDao" ref="categoryDao"/>
+    <property name="surveillanceConfigDao" ref="surveillanceViewConfigDao"/>
+  </bean>
+  <!-- Site Status beans -->
+  <bean id="siteStatusViewConfigDao" class="org.opennms.netmgt.dao.jaxb.DefaultSiteStatusViewConfigDao"/>
+  <bean id="siteStatusViewService" class="org.opennms.web.svclayer.support.DefaultSiteStatusViewService">
+    <property name="nodeDao" ref="nodeDao"/>
+    <property name="categoryDao" ref="categoryDao"/>
+    <property name="siteStatusViewConfigDao" ref="siteStatusViewConfigDao"/>
+  </bean>
+  <!-- Category Status View beans (note: categoryConfigDao is different that the DAO for the categories table -->
+  <bean id="categoryConfigDao" class="org.opennms.web.svclayer.dao.support.DefaultCategoryConfigDao"/>
+  <onmsgi:service interface="org.opennms.web.svclayer.dao.CategoryConfigDao" ref="categoryConfigDao"/>
+  <bean id="viewDisplayDao" class="org.opennms.web.svclayer.dao.support.DefaultViewDisplayDao"/>
+  <bean id="eventProxy" class="org.opennms.web.api.Util" factory-method="createEventProxy"/>
+  <bean id="troubleTicketProxy" class="org.opennms.web.svclayer.support.DefaultTroubleTicketProxy">
+    <property name="alarmDao" ref="alarmDao"/>
+    <property name="eventProxy" ref="eventProxy"/>
+  </bean>
+  <!-- Category Service Status beans -->
+  <bean id="categoryStatusService" class="org.opennms.web.svclayer.catstatus.support.DefaultCategoryStatusService">
+    <property name="categoryConfigDao" ref="categoryConfigDao"/>
+    <property name="outageDao" ref="outageDao"/>
+    <property name="viewDisplayDao" ref="viewDisplayDao"/>
+  </bean>
+  <!--  Graphing beans -->
+  <bean id="graphDao" class="org.opennms.netmgt.dao.support.PropertiesGraphDao">
+    <property name="prefabConfigs">
+      <map>
+        <entry key="performance" value="file:${opennms.home}/etc/snmp-graph.properties"/>
+        <entry key="response" value="file:${opennms.home}/etc/response-graph.properties"/>
+      </map>
+    </property>
+    <property name="adhocConfigs">
+      <map>
+        <entry key="performance" value="file:${opennms.home}/etc/snmp-adhoc-graph.properties"/>
+        <entry key="response" value="file:${opennms.home}/etc/response-adhoc-graph.properties"/>
+      </map>
+    </property>
+  </bean>
+  
+  <onmsgi:service interface="org.opennms.netmgt.dao.api.GraphDao" ref="graphDao"/>
+  
+  
+
+  <!-- Admin applications bean -->
+  <bean id="adminApplicationService" class="org.opennms.web.svclayer.support.DefaultAdminApplicationService">
+    <property name="applicationDao" ref="applicationDao"/>
+    <property name="monitoredServiceDao" ref="monitoredServiceDao"/>
+    <property name="monitoringLocationDao" ref="monitoringLocationDao"/>
+    <property name="eventProxy" ref="eventProxy"/>
+  </bean>
+  <bean id="adminCategoryService" class="org.opennms.web.svclayer.support.DefaultAdminCategoryService">
+    <property name="categoryDao" ref="categoryDao"/>
+    <property name="nodeDao" ref="nodeDao"/>
+    <property name="eventProxy" ref="eventProxy"/>
+  </bean>
+  <bean name="defaultForeignSourceService" class="org.opennms.netmgt.provision.persist.DefaultForeignSourceService">
+      <property name="pendingForeignSourceRepository" ref="selectedPendingForeignSourceRepository"/>
+      <property name="deployedForeignSourceRepository" ref="selectedDeployedForeignSourceRepository"/>
+  </bean>
+  <!-- Graphing -->
+  <bean id="resourceService" class="org.opennms.web.svclayer.support.DefaultResourceService">
+    <property name="resourceDao" ref="resourceDao"/>
+    <property name="graphDao" ref="graphDao"/>
+  </bean>
+  <bean id="graphResultsService" class="org.opennms.web.svclayer.support.DefaultGraphResultsService">
+    <property name="resourceDao" ref="resourceDao"/>
+    <property name="graphDao" ref="graphDao"/>
+    <property name="nodeDao" ref="nodeDao"/>
+    <property name="rrdDao" ref="rrdDao"/>
+    <property name="jsonStore" ref="jsonStore"/>
+  </bean>
+  <bean id="rrdGraphService" class="org.opennms.web.svclayer.support.DefaultRrdGraphService">
+    <property name="resourceDao" ref="resourceDao"/>
+    <property name="graphDao" ref="graphDao"/>
+    <property name="rrdDao" ref="rrdDao"/>
+  </bean>
+  <bean id="rrdSummaryService" class="org.opennms.web.svclayer.rrd.support.DefaultRrdSummaryService">
+    <property name="nodeDao" ref="nodeDao"/>
+    <property name="filterDao" ref="filterDao"/>
+    <property name="resourceDao" ref="resourceDao"/>
+    <property name="rrdDao" ref="rrdDao"/>
+  </bean>
+  <bean id="kscReportFactory-init" class="org.springframework.beans.factory.config.MethodInvokingFactoryBean">
+    <property name="staticMethod">
+      <value>org.opennms.netmgt.config.KSC_PerformanceReportFactory.init</value>
+    </property>
+  </bean>
+  <bean id="kscReportFactory" class="org.opennms.netmgt.config.KSC_PerformanceReportFactory" depends-on="kscReportFactory-init" factory-method="getInstance"/>
+  <bean id="kscReportService" class="org.opennms.web.svclayer.support.DefaultKscReportService">
+    <property name="resourceService" ref="resourceService"/>
+    <property name="kscReportFactory" ref="kscReportFactory"/>
+  </bean>
+  <onmsgi:service interface="org.opennms.web.svclayer.api.KscReportService" ref="kscReportService" />
+  <bean id="groupDao" class="org.opennms.netmgt.config.GroupManagerGroupDao">
+    <property name="groupManager" ref="groupManager"/>
+  </bean>
+  <!-- Availability Report Beans -->
+  <bean id="categoryConfigService" class="org.opennms.web.svclayer.support.DefaultCategoryConfigService">
+    <property name="categoryConfigDao" ref="categoryConfigDao"/>
+  </bean>
+  <bean name="/graph/results.htm" class="org.opennms.web.controller.GraphResultsController">
+    <property name="graphResultsService" ref="graphResultsService"/>
+  </bean>
+  <!-- Node List page -->
+  <bean id="nodeListService" class="org.opennms.web.svclayer.support.DefaultNodeListService">
+    <property name="nodeDao" ref="nodeDao"/>
+    <property name="categoryDao" ref="categoryDao"/>
+    <property name="siteStatusViewConfigDao" ref="siteStatusViewConfigDao"/>
+  </bean>
+  <bean id="rtcService" class="org.opennms.web.svclayer.support.DefaultRtcService">
+    <property name="monitoredServiceDao" ref="monitoredServiceDao"/>
+    <property name="outageDao" ref="outageDao"/>
+  </bean>
+  <bean id="foreignSourceAndRequisitionAccessService" class="org.opennms.web.svclayer.support.DefaultRequisitionAccessService"></bean>
+  <onmsgi:service interface="org.opennms.web.svclayer.api.RequisitionAccessService" ref="foreignSourceAndRequisitionAccessService" />
+  <bean id="snmpConfigAccessService" class="org.opennms.netmgt.config.SnmpConfigAccessService" />
+</beans>

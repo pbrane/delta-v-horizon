@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <parent>
+    <groupId>org.opennms.features</groupId>
+    <artifactId>org.opennms.features.collection</artifactId>
+    <version>1.0.0</version>
+  </parent>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.opennms.features.collection</groupId>
+  <artifactId>org.opennms.features.collection.config</artifactId>
+  <name>OpenNMS :: Features :: Collection :: Config</name>
+  <dependencies>
+    <!-- Config API (DataCollectionConfigDao, ResourceTypesDao interfaces) -->
+    <dependency>
+      <groupId>org.opennms</groupId>
+      <artifactId>opennms-config-api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- Config model (DatacollectionConfig, SnmpCollection, DatacollectionGroup, etc.) -->
+    <dependency>
+      <groupId>org.opennms</groupId>
+      <artifactId>opennms-config-model</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- AbstractJaxbConfigDao, AbstractMergingJaxbConfigDao -->
+    <dependency>
+      <groupId>org.opennms.core</groupId>
+      <artifactId>org.opennms.core.xml</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- ConfigReloadContainer -->
+    <dependency>
+      <groupId>org.opennms.core</groupId>
+      <artifactId>org.opennms.core.config</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- RrdRepository -->
+    <dependency>
+      <groupId>org.opennms</groupId>
+      <artifactId>opennms-rrd-api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- Collection API (AttributeGroupType) -->
+    <dependency>
+      <groupId>org.opennms.features.collection</groupId>
+      <artifactId>org.opennms.features.collection.api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- ConfigFileConstants -->
+    <dependency>
+      <groupId>org.opennms</groupId>
+      <artifactId>opennms-util</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- Jackson XmlMapper (for DataCollectionConfigParser) -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.dataformat</groupId>
+      <artifactId>jackson-dataformat-xml</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.module</groupId>
+      <artifactId>jackson-module-jaxb-annotations</artifactId>
+    </dependency>
+
+    <!-- commons-lang (StringUtils in DefaultDataCollectionConfigDao) -->
+    <dependency>
+      <groupId>commons-lang</groupId>
+      <artifactId>commons-lang</artifactId>
+    </dependency>
+
+    <!-- Logging -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+  </dependencies>
+</project>

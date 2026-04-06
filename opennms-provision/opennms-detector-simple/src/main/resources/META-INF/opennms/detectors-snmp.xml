@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-4.2.xsd">
+
+    <!--
+      SNMP detector factory bean declarations. SnmpAgentConfigFactory is injected
+      via constructor. A 'snmpPeerFactory' bean (implementing SnmpAgentConfigFactory)
+      must exist in the surrounding context. Production daemon boot provides the
+      same wiring via DetectorRegistryConfiguration @Bean methods.
+      Bean ids follow DetectorBeanNameGenerator's fully-qualified-class-name convention.
+    -->
+    <bean id="org.opennms.netmgt.provision.detector.snmp.SnmpDetectorFactory"
+          class="org.opennms.netmgt.provision.detector.snmp.SnmpDetectorFactory">
+        <constructor-arg ref="snmpPeerFactory"/>
+    </bean>
+    <bean id="org.opennms.netmgt.provision.detector.snmp.BgpSessionDetectorFactory"
+          class="org.opennms.netmgt.provision.detector.snmp.BgpSessionDetectorFactory">
+        <constructor-arg ref="snmpPeerFactory"/>
+    </bean>
+    <bean id="org.opennms.netmgt.provision.detector.snmp.CiscoIpSlaDetectorFactory"
+          class="org.opennms.netmgt.provision.detector.snmp.CiscoIpSlaDetectorFactory">
+        <constructor-arg ref="snmpPeerFactory"/>
+    </bean>
+    <bean id="org.opennms.netmgt.provision.detector.snmp.DiskUsageDetectorFactory"
+          class="org.opennms.netmgt.provision.detector.snmp.DiskUsageDetectorFactory">
+        <constructor-arg ref="snmpPeerFactory"/>
+    </bean>
+    <bean id="org.opennms.netmgt.provision.detector.snmp.HostResourceSWRunDetectorFactory"
+          class="org.opennms.netmgt.provision.detector.snmp.HostResourceSWRunDetectorFactory">
+        <constructor-arg ref="snmpPeerFactory"/>
+    </bean>
+    <bean id="org.opennms.netmgt.provision.detector.snmp.OmsaStorageDetectorFactory"
+          class="org.opennms.netmgt.provision.detector.snmp.OmsaStorageDetectorFactory">
+        <constructor-arg ref="snmpPeerFactory"/>
+    </bean>
+    <bean id="org.opennms.netmgt.provision.detector.snmp.OpenManageChassisDetectorFactory"
+          class="org.opennms.netmgt.provision.detector.snmp.OpenManageChassisDetectorFactory">
+        <constructor-arg ref="snmpPeerFactory"/>
+    </bean>
+    <bean id="org.opennms.netmgt.provision.detector.snmp.PercDetectorFactory"
+          class="org.opennms.netmgt.provision.detector.snmp.PercDetectorFactory">
+        <constructor-arg ref="snmpPeerFactory"/>
+    </bean>
+    <bean id="org.opennms.netmgt.provision.detector.snmp.Win32ServiceDetectorFactory"
+          class="org.opennms.netmgt.provision.detector.snmp.Win32ServiceDetectorFactory">
+        <constructor-arg ref="snmpPeerFactory"/>
+    </bean>
+
+</beans>

@@ -1,0 +1,40 @@
+#
+# DON'T EDIT THIS FILE :: GENERATED WITH CONFD
+#
+startDelaySeconds: 10
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+autoExcludeObjectNameAttributes: true
+
+includeObjectNames:
+  - "java.lang:*"
+  - "org.opennms.*:*"
+  - "kafka.producer:*"
+  - "org.apache.camel:*"
+
+rules:
+  - pattern: "java.lang.*"
+  - pattern: "kafka.producer.*"
+  - pattern: "org.apache.camel.*"
+  - pattern: org\.opennms\..+\.(.+)<name=(.+)><>Value
+    name: minion_$1_$2
+    type: GAUGE
+
+  - pattern: org\.opennms\..+\.(.+)<name=(.+)><>Count
+    name: minion_$1_$2_count
+    type: COUNTER
+
+  - pattern: org\.opennms\..+\.(.+)<name=(.+)><>(\d+)thPercentile
+    name: minion_$1_$2
+    type: GAUGE
+    labels:
+      quantile: "0.$3"
+
+  # Per-device trapd metrics
+  - pattern: 'org\.opennms\.netmgt\.trapd\.device<location="([^"]+)", ip="([^"]+)", type=([^>]+)><>(\w+)'
+    name: trapd_device_$4
+    type: COUNTER
+    labels:
+      location: "$1"
+      ip: "$2"
+      type: "$3"

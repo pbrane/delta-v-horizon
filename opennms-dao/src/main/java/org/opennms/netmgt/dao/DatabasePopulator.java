@@ -1,0 +1,819 @@
+/*
+ * Licensed to The OpenNMS Group, Inc (TOG) under one or more
+ * contributor license agreements.  See the LICENSE.md file
+ * distributed with this work for additional information
+ * regarding copyright ownership.
+ *
+ * TOG licenses this file to You under the GNU Affero General
+ * Public License Version 3 (the "License") or (at your option)
+ * any later version.  You may not use this file except in
+ * compliance with the License.  You may obtain a copy of the
+ * License at:
+ *
+ *      https://www.gnu.org/licenses/agpl-3.0.txt
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied.  See the License for the specific
+ * language governing permissions and limitations under the
+ * License.
+ */
+package org.opennms.netmgt.dao;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
+
+import org.opennms.core.utils.InetAddressUtils;
+import org.opennms.netmgt.dao.api.AcknowledgmentDao;
+import org.opennms.netmgt.dao.api.AlarmAssociationDao;
+import org.opennms.netmgt.dao.api.AlarmDao;
+import org.opennms.netmgt.dao.api.ApplicationDao;
+import org.opennms.netmgt.dao.api.AssetRecordDao;
+import org.opennms.netmgt.dao.api.CategoryDao;
+import org.opennms.netmgt.dao.api.DistPollerDao;
+import org.opennms.netmgt.dao.api.IpInterfaceDao;
+import org.opennms.netmgt.dao.api.MonitoredServiceDao;
+import org.opennms.netmgt.dao.api.MonitoringLocationDao;
+import org.opennms.netmgt.dao.api.MonitoringSystemDao;
+import org.opennms.netmgt.dao.api.NodeDao;
+import org.opennms.netmgt.dao.api.OnmsDao;
+import org.opennms.netmgt.dao.api.OutageDao;
+import org.opennms.netmgt.dao.api.ServiceTypeDao;
+import org.opennms.netmgt.dao.api.SnmpInterfaceDao;
+import org.opennms.netmgt.model.AckAction;
+import org.opennms.netmgt.model.AckType;
+import org.opennms.netmgt.model.AlarmAssociation;
+import org.opennms.netmgt.model.NetworkBuilder;
+import org.opennms.netmgt.model.OnmsAcknowledgment;
+import org.opennms.netmgt.model.OnmsAlarm;
+import org.opennms.netmgt.model.OnmsCategory;
+import org.opennms.netmgt.model.OnmsDistPoller;
+import org.opennms.netmgt.model.OnmsIpInterface;
+import org.opennms.netmgt.model.OnmsMonitoredService;
+import org.opennms.netmgt.model.OnmsMonitoringSystem;
+import org.opennms.netmgt.model.OnmsNode;
+import org.opennms.netmgt.model.OnmsNode.NodeType;
+import org.opennms.netmgt.model.OnmsOutage;
+import org.opennms.netmgt.model.OnmsServiceType;
+import org.opennms.netmgt.model.OnmsSeverity;
+import org.opennms.netmgt.model.OnmsSnmpInterface;
+import org.opennms.netmgt.model.monitoringLocations.OnmsMonitoringLocation;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionCallbackWithoutResult;
+import org.springframework.transaction.support.TransactionOperations;
+
+
+/**
+ * Populates a test database with some entities (nodes, interfaces, services).
+ * 
+ * Example usage:
+ * <pre>
+ * private DatabasePopulator m_populator;
+ *
+ * @Override
+ * protected String[] getConfigLocations() {
+ *     return new String[] {
+ *         "classpath:/META-INF/opennms/applicationContext-dao.xml",
+ *         "classpath:/META-INF/opennms/applicationContext-databasePopulator.xml"
+ *     };
+ * }
+ * 
+ * @Override
+ * protected void onSetUpInTransactionIfEnabled() {
+ *     m_populator.populateDatabase();
+ * }
+ * 
+ * public void setPopulator(DatabasePopulator populator) {
+ *     m_populator = populator;
+ * }
+ * </pre>
+ *
+ * @author <a href="mailto:dj@opennms.org">DJ Gregor</a>
+ */
+public class DatabasePopulator {
+
+    public static interface Extension<T extends OnmsDao<?,?>> {
+		DaoSupport<T> getDaoSupport();
+		void onPopulate(DatabasePopulator populator, T dao);
+		void onShutdown(DatabasePopulator populator, T dao);
+	}
+	
+	public static class DaoSupport<T extends OnmsDao<?,?>> {
+		private final Class<T> daoClass;
+		private final T daoObject;
+		
+		public DaoSupport(Class<T> daoClass, T daoObject) {
+			this.daoClass = daoClass;
+			this.daoObject = daoObject;
+		}
+		
+		public Class<T> getDaoClass() {
+			return (Class<T>)this.daoClass;
+		}
+		
+		public T getDao() {
+			return this.daoObject;
+		}
+	}
+	
+    private static final Logger LOG = LoggerFactory.getLogger(DatabasePopulator.class);
+
+    private DistPollerDao m_distPollerDao;
+    private NodeDao m_nodeDao;
+    private IpInterfaceDao m_ipInterfaceDao;
+    private SnmpInterfaceDao m_snmpInterfaceDao;
+    private MonitoredServiceDao m_monitoredServiceDao;
+    private ServiceTypeDao m_serviceTypeDao;
+    private AssetRecordDao m_assetRecordDao;
+    private CategoryDao m_categoryDao;
+    private OutageDao m_outageDao;
+    private AlarmDao m_alarmDao;
+    private AlarmAssociationDao m_alarmAssociationDao;
+    private MonitoringLocationDao m_monitoringLocationDao;
+    private ApplicationDao applicationDao;
+    private AcknowledgmentDao m_acknowledgmentDao;
+    private TransactionOperations m_transOperation;
+    private OnmsNode m_node1;
+    private OnmsNode m_node2;
+    private OnmsNode m_node3;
+    private OnmsNode m_node4;
+    private OnmsNode m_node5;
+    private OnmsNode m_node6;
+
+    private OnmsMonitoringLocation locRDU;
+    private OnmsMonitoringLocation locFD;
+    
+    private boolean m_populateInSeparateTransaction = true;
+    private boolean m_resetInSeperateTransaction = true;
+    private final List<Extension> extensions = new ArrayList<>();
+    
+    private Map<Class<? super OnmsDao<?,?>>, OnmsDao<?,?>> daoRegistry = new HashMap<Class<? super OnmsDao<?,?>>, OnmsDao<?,?>>();
+    
+    public <T extends OnmsDao<?,?>> T lookupDao(Class<? super OnmsDao<?,?>> daoClass) {
+    	for (Class<? super OnmsDao<?,?>> eachDaoClass : daoRegistry.keySet()) {
+    		if (eachDaoClass.isAssignableFrom(daoClass)) {
+    			return (T)daoRegistry.get(eachDaoClass);
+    		}
+    	}
+    	return null;
+    }
+
+    public void registerDao(Class<? super OnmsDao<?,?>> daoClass, OnmsDao<?,?> dao) {
+    	if (dao == null || daoClass == null) return;
+    	// check if not already added
+    	for (Class<? super OnmsDao<?,?>> eachDaoClass : daoRegistry.keySet()) {
+    		if (eachDaoClass.isAssignableFrom(daoClass)) {
+    			return; // a super class for this is already added (ignore)
+    		}
+    	}
+    	// adding
+    	daoRegistry.put(daoClass, dao);
+    }
+    
+    public void addExtension(Extension extension) {
+    	if (extension == null) return;
+    	extensions.add(extension);
+    }
+    
+    public boolean populateInSeparateTransaction() {
+        return m_populateInSeparateTransaction;
+    }
+    
+    public void setPopulateInSeparateTransaction(final boolean pop) {
+        m_populateInSeparateTransaction = pop;
+    }
+
+    public void setResetInSeperateTransaction(boolean resetInSeperateTransaction) {
+        m_resetInSeperateTransaction = resetInSeperateTransaction;
+    }
+
+    public void populateDatabase() {
+        if (m_populateInSeparateTransaction) {
+            m_transOperation.execute(new TransactionCallbackWithoutResult() {
+                @Override
+                public void doInTransactionWithoutResult(final TransactionStatus status) {
+                    doPopulateDatabase();
+                }
+            });
+        } else {
+            doPopulateDatabase();
+        }
+    }
+
+    /**
+     * Populate a "main" DistPoller (an OnmsMonitoringSystem) entry in the database, if it doesn't already exist.
+     * This is for tests that need a MonitoringSystem with a different id or other fields than the
+     * default DistPoller.
+     * Those tests should call resetDatabase(true) before and after the tests.
+     */
+    public void populateMainDistPoller(String id, String label, String location) {
+        if (m_populateInSeparateTransaction) {
+            m_transOperation.execute(new TransactionCallbackWithoutResult() {
+                @Override
+                public void doInTransactionWithoutResult(final TransactionStatus status) {
+                    doPopulateMainDistPoller(id, label, location);
+                }
+            });
+        } else {
+            doPopulateMainDistPoller(id, label, location);
+        }
+    }
+
+    public void resetDatabase() {
+        resetDatabase(false);
+    }
+
+    /**
+     * Reset the database, clear all rows.
+     * @param includingMonitoringSystems If true, also removes any MonitoringSystem entries.
+     */
+    public void resetDatabase(boolean includingMonitoringSystems) {
+        if (m_resetInSeperateTransaction) {
+            m_transOperation.execute(new TransactionCallbackWithoutResult() {
+                @Override
+                public void doInTransactionWithoutResult(final TransactionStatus status) {
+                    doResetDatabase(includingMonitoringSystems);
+                }
+            });
+        } else {
+            doResetDatabase(includingMonitoringSystems);
+        }
+    }
+
+    private void doResetDatabase(boolean includingMonitoringSystems) {
+        LOG.debug("==== DatabasePopulator Reset ====");
+
+        for (final OnmsOutage outage : m_outageDao.findAll()) {
+            m_outageDao.delete(outage);
+        }
+        for (final AlarmAssociation ass : m_alarmAssociationDao.findAll()) {
+            ass.getRelatedAlarm().getAssociatedAlarms().clear();
+            ass.getSituationAlarm().getAssociatedAlarms().clear();
+            m_alarmAssociationDao.delete(ass);
+        }
+        for (final OnmsAlarm alarm : m_alarmDao.findAll()) {
+            m_alarmDao.delete(alarm);
+        }
+
+        for (final OnmsSnmpInterface snmpIface : m_snmpInterfaceDao.findAll()) {
+            for (OnmsIpInterface eachIf : snmpIface.getIpInterfaces()) {
+                eachIf.setSnmpInterface(null);
+                snmpIface.getNode().getIpInterfaces().remove(eachIf);
+            }
+            snmpIface.getNode().getSnmpInterfaces().remove(snmpIface);
+            m_snmpInterfaceDao.delete(snmpIface);
+        }
+        for (final OnmsIpInterface iface : m_ipInterfaceDao.findAll()) {
+            iface.setSnmpInterface(null);
+            iface.getNode().getIpInterfaces().remove(iface);
+            m_ipInterfaceDao.delete(iface);
+        }
+        for (final OnmsNode node : m_nodeDao.findAll()) {
+            m_nodeDao.delete(node);
+        }
+        for (final OnmsServiceType service : m_serviceTypeDao.findAll()) {
+            m_serviceTypeDao.delete(service);
+        }
+        for (final OnmsMonitoringLocation location : m_monitoringLocationDao.findAll()) {
+            // Don't delete the default localhost monitoring location
+            if (!MonitoringLocationDao.DEFAULT_MONITORING_LOCATION_ID.equals(location.getLocationName())) {
+                m_monitoringLocationDao.delete(location);
+            }
+        }
+
+        if (includingMonitoringSystems) {
+            for (final OnmsDistPoller system : m_distPollerDao.findAll()) {
+                m_distPollerDao.delete(system.getId());
+            }
+        }
+
+        for (final OnmsCategory category : m_categoryDao.findAll()) {
+            m_categoryDao.delete(category);
+        }
+
+        LOG.debug("= DatabasePopulatorExtension Reset Starting =");
+    	for (Extension eachExtension : extensions) {
+    			DaoSupport daoSupport = eachExtension.getDaoSupport();
+    			OnmsDao<?,?> dao = daoSupport != null && daoSupport.getDaoClass() != null ? lookupDao(daoSupport.getDaoClass()) : null;
+
+    			eachExtension.onShutdown(this, dao);
+    			if (dao != null) {
+    				dao.flush();
+    			}
+    	}
+    	LOG.debug("= DatabasePopulatorExtension Reset Finished =");
+        
+        m_outageDao.flush();
+        m_alarmAssociationDao.flush();
+        m_alarmDao.flush();
+        m_snmpInterfaceDao.flush();
+        m_ipInterfaceDao.flush();
+        m_nodeDao.flush();
+        m_serviceTypeDao.flush();
+        m_monitoringLocationDao.flush();
+        m_distPollerDao.flush();
+
+        LOG.debug("==== DatabasePopulator Reset Finished ====");
+    }
+
+    private void doPopulateDatabase() {
+        LOG.debug("==== DatabasePopulator Starting ====");
+
+        final NetworkBuilder builder = new NetworkBuilder(m_distPollerDao.whoami());
+
+        final OnmsNode node1 = buildNode1(builder);
+        getNodeDao().save(node1);
+        getNodeDao().flush();
+
+        OnmsNode node2 = buildNode2(builder);
+        getNodeDao().save(node2);
+        getNodeDao().flush();
+        setNode2(node2);
+        
+        OnmsNode node3 = buildNode3(builder);
+        getNodeDao().save(node3);
+        getNodeDao().flush();
+        setNode3(node3);
+        
+        OnmsNode node4 = buildNode4(builder);
+        getNodeDao().save(node4);
+        getNodeDao().flush();
+        setNode4(node4);
+        
+        OnmsNode node5 = buildNode5(builder);
+        getNodeDao().save(node5);
+        getNodeDao().flush();
+        setNode5(node5);
+        
+        OnmsNode node6 = buildNode6(builder);
+        getNodeDao().save(node6);
+        getNodeDao().flush();
+        setNode6(node6);
+
+        final String testEventUei = "uei.opennms.org/test";
+        final long testEventTsid = 1L;
+
+        final OnmsMonitoredService svc = getMonitoredServiceDao().get(node1.getId(), InetAddressUtils.addr("192.168.1.1"), "SNMP");
+        final OnmsOutage resolved = new OnmsOutage(new Date(1436881548292L), new Date(1436881548292L), svc, null, null);
+        resolved.setSvcLostEventTsid(testEventTsid);
+        resolved.setSvcLostEventUei(testEventUei);
+        resolved.setSvcRegainedEventTsid(testEventTsid);
+        resolved.setSvcRegainedEventUei(testEventUei);
+        getOutageDao().save(resolved);
+        getOutageDao().flush();
+
+        final OnmsOutage unresolved = new OnmsOutage(new Date(1436881548292L), svc);
+        unresolved.setSvcLostEventTsid(testEventTsid);
+        unresolved.setSvcLostEventUei(testEventUei);
+        getOutageDao().save(unresolved);
+        getOutageDao().flush();
+
+        final OnmsAlarm alarm = buildAlarm(testEventUei, testEventTsid);
+        getAlarmDao().save(alarm);
+        getAlarmDao().flush();
+        
+        final OnmsAcknowledgment ack = new OnmsAcknowledgment();
+        ack.setAckTime(new Date(1437073152156L));
+        ack.setAckType(AckType.UNSPECIFIED);
+        ack.setAckAction(AckAction.UNSPECIFIED);
+        ack.setAckUser("admin");
+        getAcknowledgmentDao().save(ack);
+        getAcknowledgmentDao().flush();
+        
+        locRDU = new OnmsMonitoringLocation();
+        locRDU.setLocationName("RDU");
+        locRDU.setMonitoringArea("East Coast");
+        locRDU.setGeolocation("Research Triangle Park, NC");
+        locRDU.setLatitude(35.715751f);
+        locRDU.setLongitude(-79.16262f);
+        locRDU.setPriority(1L);
+        locRDU.setTags(Collections.singletonList("blah"));
+        m_monitoringLocationDao.save(locRDU);
+
+        locFD = new OnmsMonitoringLocation();
+        locFD.setLocationName("Fulda");
+        locFD.setMonitoringArea("Europe");
+        locFD.setGeolocation("Fulda, DE");
+        locFD.setLatitude(50.5558f);
+        locFD.setLongitude(9.6808f);
+        locFD.setPriority(1L);
+        locFD.setTags(Collections.singletonList("blub"));
+        m_monitoringLocationDao.save(locFD);
+
+        // added this to assure that the old behaviour before PerspectivePoller is still the same, see NMS-12792
+        final OnmsOutage perspectiveResolved = new OnmsOutage(new Date(1436881448292L), new Date(1436881448292L), svc, null, null);
+        perspectiveResolved.setSvcLostEventTsid(testEventTsid);
+        perspectiveResolved.setSvcLostEventUei(testEventUei);
+        perspectiveResolved.setSvcRegainedEventTsid(testEventTsid);
+        perspectiveResolved.setSvcRegainedEventUei(testEventUei);
+        perspectiveResolved.setPerspective(locFD);
+        getOutageDao().save(perspectiveResolved);
+        getOutageDao().flush();
+
+        final OnmsOutage perspectiveUnresolved = new OnmsOutage(new Date(1436881448292L), svc);
+        perspectiveUnresolved.setSvcLostEventTsid(testEventTsid);
+        perspectiveUnresolved.setSvcLostEventUei(testEventUei);
+        perspectiveUnresolved.setPerspective(locRDU);
+        getOutageDao().save(perspectiveUnresolved);
+        getOutageDao().flush();
+
+        LOG.debug("= DatabasePopulatorExtension Populate Starting =");
+        for (Extension eachExtension : extensions) {
+        	DaoSupport daoSupport = eachExtension.getDaoSupport();
+        	OnmsDao<?,?> dao = daoSupport != null ? daoSupport.getDao() : null;
+        	Class<? super OnmsDao<?,?>> daoClass = daoSupport != null ? daoSupport.getDaoClass() : null;
+        	registerDao(daoClass, dao);
+
+        	dao = lookupDao(daoClass);
+        	eachExtension.onPopulate(this, dao);
+        	if (dao != null) {
+        		dao.flush();
+        	}
+        }
+        LOG.debug("= DatabasePopulatorExtension Populate Finished =");
+        
+        LOG.debug("==== DatabasePopulator Finished ====");
+    }
+
+    private void doPopulateMainDistPoller(String id, String label, String location) {
+        // If main entry already exists, ignore
+        final OnmsDistPoller system = m_distPollerDao.whoami();
+
+        if (system == null) {
+            // Did not exist, add it
+            OnmsDistPoller newSystem = new OnmsDistPoller();
+            newSystem.setId(id);
+            newSystem.setLabel(label);
+            newSystem.setLocation(location);
+            newSystem.setType(OnmsMonitoringSystem.TYPE_OPENNMS);
+
+            m_distPollerDao.save(newSystem);
+            m_distPollerDao.flush();
+        }
+   }
+
+    private OnmsCategory getCategory(final String categoryName) {
+        OnmsCategory cat = m_categoryDao.findByName(categoryName, true);
+        if (cat == null) {
+            cat = new OnmsCategory(categoryName);
+            m_categoryDao.save(cat);
+            m_categoryDao.flush();
+        }
+        return cat;
+    }
+
+    public OnmsServiceType getService(final String serviceName) {
+        OnmsServiceType service = m_serviceTypeDao.findByName(serviceName);
+        if (service == null) {
+            service = new OnmsServiceType(serviceName);
+            m_serviceTypeDao.save(service);
+            m_serviceTypeDao.flush();
+        }
+        return service;
+    }
+
+    private OnmsNode buildNode1(final NetworkBuilder builder) {
+        setNode1(builder.addNode("node1").setForeignSource("imported:").setForeignId("1").setType(NodeType.ACTIVE).getNode());
+        builder.addCategory(getCategory("DEV_AC"));
+        builder.addCategory(getCategory("IMP_mid"));
+        builder.addCategory(getCategory("OPS_Online"));
+        builder.addCategory(getCategory("Routers")); 
+        builder.setBuilding("HQ");
+        builder.addSnmpInterface(1)
+            .setCollectionEnabled(true)
+            .setIfOperStatus(1)
+            .setIfSpeed(10000000)
+            .setIfDescr("ATM0")
+            .setIfName("atm0")
+            .setIfAlias("Initial ifAlias value")
+            .setIfType(37)
+            .setPhysAddr("34E45604BB69")
+            .addIpInterface("192.168.1.1").setIsManaged("M").setIsSnmpPrimary("P");
+        //getNodeDao().save(builder.getCurrentNode());
+        //getNodeDao().flush();
+        builder.addService(getService("ICMP"));
+        builder.addService(getService("SNMP"));
+        builder.addSnmpInterface(2)
+            .setCollectionEnabled(true)
+            .setIfOperStatus(1)
+            .setIfSpeed(10000000)
+            .setIfName("eth0")
+            .setIfType(6)
+            .setPhysAddr("C9D2DFC7CB68")
+            .addIpInterface("192.168.1.2").setIsManaged("M").setIsSnmpPrimary("S");
+        builder.addService(getService("ICMP"));
+        builder.addService(getService("HTTP"));
+        builder.addSnmpInterface(3)
+            .setCollectionEnabled(false)
+            .setIfOperStatus(1)
+            .setIfSpeed(10000000)
+            .setPhysAddr("EE8CE7F4BE99")
+            .addIpInterface("192.168.1.3").setIsManaged("M").setIsSnmpPrimary("N");
+        builder.addService(getService("ICMP"));
+        builder.addSnmpInterface(4)
+            .setCollectionEnabled(false)
+            .setIfOperStatus(1)
+            .setIfSpeed(10000000)
+            .setPhysAddr("4AF39F080908")
+            .addIpInterface("fe80:0000:0000:0000:aaaa:bbbb:cccc:dddd%5").setIsManaged("M").setIsSnmpPrimary("N");
+        builder.addService(getService("ICMP"));
+        return builder.getCurrentNode();
+    }
+
+    private OnmsNode buildNode2(final NetworkBuilder builder) {
+        builder.addNode("node2").setForeignSource("imported:").setForeignId("2").setType(NodeType.ACTIVE);
+        builder.addCategory(getCategory("IMP_mid"));
+        builder.addCategory(getCategory("Servers"));
+        builder.setBuilding("HQ");
+        builder.addInterface("192.168.2.1").setIsManaged("M").setIsSnmpPrimary("P");
+        builder.addService(getService("ICMP"));
+        builder.addService(getService("SNMP"));
+        builder.addInterface("192.168.2.2").setIsManaged("M").setIsSnmpPrimary("S");
+        builder.addService(getService("ICMP"));
+        builder.addService(getService("HTTP"));
+        builder.addInterface("192.168.2.3").setIsManaged("M").setIsSnmpPrimary("N");
+        builder.addService(getService("ICMP"));
+        return builder.getCurrentNode();
+    }
+
+    private OnmsNode buildNode3(final NetworkBuilder builder) {
+        builder.addNode("node3").setForeignSource("imported:").setForeignId("3").setType(NodeType.ACTIVE);
+        builder.addCategory(getCategory("OPS_Online"));
+        builder.addInterface("192.168.3.1").setIsManaged("M").setIsSnmpPrimary("P");
+        builder.addService(getService("ICMP"));
+        builder.addService(getService("SNMP"));
+        builder.addInterface("192.168.3.2").setIsManaged("M").setIsSnmpPrimary("S");
+        builder.addService(getService("ICMP"));
+        builder.addService(getService("HTTP"));
+        builder.addInterface("192.168.3.3").setIsManaged("M").setIsSnmpPrimary("N");
+        builder.addService(getService("ICMP"));
+        return builder.getCurrentNode();
+    }
+
+    private OnmsNode buildNode4(final NetworkBuilder builder) {
+        builder.addNode("node4").setForeignSource("imported:").setForeignId("4").setType(NodeType.ACTIVE);
+        builder.addCategory(getCategory("DEV_AC"));
+        builder.addInterface("192.168.4.1").setIsManaged("M").setIsSnmpPrimary("P");
+        builder.addService(getService("ICMP"));
+        builder.addService(getService("SNMP"));
+        builder.addInterface("192.168.4.2").setIsManaged("M").setIsSnmpPrimary("S");
+        builder.addService(getService("ICMP"));
+        builder.addService(getService("HTTP"));
+        builder.addInterface("192.168.4.3").setIsManaged("M").setIsSnmpPrimary("N");
+        builder.addService(getService("ICMP"));
+        return builder.getCurrentNode();
+    }
+
+    private OnmsNode buildNode5(final NetworkBuilder builder) {
+        //This node purposely doesn't have a foreignId style assetNumber
+        builder.addNode("alternate-node1").setType(NodeType.ACTIVE).getAssetRecord().setAssetNumber("5");
+        builder.addCategory(getCategory("DEV_AC"));
+        builder.addCategory(getCategory("Switches"));
+        builder.addInterface("10.1.1.1").setIsManaged("M").setIsSnmpPrimary("P");
+        builder.addService(getService("ICMP"));
+        builder.addService(getService("SNMP"));
+        builder.addInterface("10.1.1.2").setIsManaged("M").setIsSnmpPrimary("S");
+        builder.addService(getService("ICMP"));
+        builder.addService(getService("HTTP"));
+        builder.addInterface("10.1.1.3").setIsManaged("M").setIsSnmpPrimary("N");
+        builder.addService(getService("ICMP"));
+        return builder.getCurrentNode();
+    }
+
+    private OnmsNode buildNode6(final NetworkBuilder builder) {
+        //This node purposely doesn't have a assetNumber and is used by a test to check the category
+        builder.addNode("alternate-node2").setType(NodeType.ACTIVE).getAssetRecord().setDisplayCategory("category1");
+        builder.addCategory(getCategory("DEV_AC"));
+        builder.addInterface("10.1.2.1").setIsManaged("M").setIsSnmpPrimary("P");
+        builder.addService(getService("ICMP"));
+        builder.addService(getService("SNMP"));
+        builder.addInterface("10.1.2.2").setIsManaged("M").setIsSnmpPrimary("S");
+        builder.addService(getService("ICMP"));
+        builder.addService(getService("HTTP"));
+        builder.addInterface("10.1.2.3").setIsManaged("M").setIsSnmpPrimary("N");
+        builder.addService(getService("ICMP"));
+        return builder.getCurrentNode();
+    }
+
+    private OnmsAlarm buildAlarm(final String eventUei, final long eventTsid) {
+        final OnmsAlarm alarm = new OnmsAlarm();
+        alarm.setDistPoller(getDistPollerDao().whoami());
+        alarm.setUei(eventUei);
+        alarm.setAlarmType(OnmsAlarm.PROBLEM_TYPE);
+        alarm.setNode(m_node1);
+        alarm.setDescription("This is a test alarm");
+        alarm.setLogMsg("this is a test alarm log message");
+        alarm.setCounter(1);
+        alarm.setIpAddr(InetAddressUtils.getInetAddress("192.168.1.1"));
+        alarm.setSeverity(OnmsSeverity.NORMAL);
+        alarm.setFirstEventTime(new Date(1437061537105L));
+        alarm.setLastEventTime(new Date(1437061537105L));
+        alarm.setEventTsid(eventTsid);
+        alarm.setEventUei(eventUei);
+        alarm.setServiceType(m_serviceTypeDao.findByName("ICMP"));
+        return alarm;
+    }
+
+    public AlarmDao getAlarmDao() {
+        return m_alarmDao;
+    }
+
+
+    public void setAlarmDao(final AlarmDao alarmDao) {
+        m_alarmDao = alarmDao;
+    }
+
+    public AlarmAssociationDao getAlarmAssociationDao() {
+        return m_alarmAssociationDao;
+    }
+
+    public void setAlarmAssociationDao(final AlarmAssociationDao dao) {
+        m_alarmAssociationDao = dao;
+    }
+
+    public AssetRecordDao getAssetRecordDao() {
+        return m_assetRecordDao;
+    }
+
+
+    public void setAssetRecordDao(final AssetRecordDao assetRecordDao) {
+        m_assetRecordDao = assetRecordDao;
+    }
+
+
+    public CategoryDao getCategoryDao() {
+        return m_categoryDao;
+    }
+
+
+    public void setCategoryDao(final CategoryDao categoryDao) {
+        m_categoryDao = categoryDao;
+    }
+
+
+    public DistPollerDao getDistPollerDao() {
+        return m_distPollerDao;
+    }
+
+
+    public void setDistPollerDao(final DistPollerDao distPollerDao) {
+        m_distPollerDao = distPollerDao;
+    }
+
+
+    public IpInterfaceDao getIpInterfaceDao() {
+        return m_ipInterfaceDao;
+    }
+
+
+    public void setIpInterfaceDao(final IpInterfaceDao ipInterfaceDao) {
+        m_ipInterfaceDao = ipInterfaceDao;
+    }
+
+
+    public MonitoredServiceDao getMonitoredServiceDao() {
+        return m_monitoredServiceDao;
+    }
+
+
+    public void setMonitoredServiceDao(final MonitoredServiceDao monitoredServiceDao) {
+        m_monitoredServiceDao = monitoredServiceDao;
+    }
+
+
+    public NodeDao getNodeDao() {
+        return m_nodeDao;
+    }
+
+
+    public void setNodeDao(final NodeDao nodeDao) {
+        m_nodeDao = nodeDao;
+    }
+
+
+    public OutageDao getOutageDao() {
+        return m_outageDao;
+    }
+
+
+    public void setOutageDao(final OutageDao outageDao) {
+        m_outageDao = outageDao;
+    }
+
+
+    public ServiceTypeDao getServiceTypeDao() {
+        return m_serviceTypeDao;
+    }
+
+
+    public void setServiceTypeDao(final ServiceTypeDao serviceTypeDao) {
+        m_serviceTypeDao = serviceTypeDao;
+    }
+
+
+    public SnmpInterfaceDao getSnmpInterfaceDao() {
+        return m_snmpInterfaceDao;
+    }
+
+
+    public void setSnmpInterfaceDao(final SnmpInterfaceDao snmpInterfaceDao) {
+        m_snmpInterfaceDao = snmpInterfaceDao;
+    }
+
+
+    
+    public OnmsNode getNode1() {
+        return m_node1;
+    }
+    
+    public OnmsNode getNode2() {
+        return m_node2;
+    }
+    
+    public OnmsNode getNode3() {
+        return m_node3;
+    }
+    
+    public OnmsNode getNode4() {
+        return m_node4;
+    }
+    
+    public OnmsNode getNode5() {
+        return m_node5;
+    }
+    
+    public OnmsNode getNode6() {
+        return m_node6;
+    }
+    
+    private void setNode1(final OnmsNode node1) {
+        m_node1 = node1;
+    }
+
+    private void setNode2(final OnmsNode node2) {
+        m_node2 = node2;
+    }
+
+    private void setNode3(final OnmsNode node3) {
+        m_node3 = node3;
+    }
+
+    private void setNode4(final OnmsNode node4) {
+        m_node4 = node4;
+    }
+
+    private void setNode5(final OnmsNode node5) {
+        m_node5 = node5;
+    }
+
+    public OnmsMonitoringLocation getLocRDU() {
+        return this.locRDU;
+    }
+
+    public OnmsMonitoringLocation getLocFD() {
+        return this.locFD;
+    }
+
+    private void setNode6(final OnmsNode node6) {
+        m_node6 = node6;
+    }
+
+    public MonitoringLocationDao getMonitoringLocationDao() {
+        return m_monitoringLocationDao;
+    }
+
+    public void setMonitoringLocationDao(final MonitoringLocationDao monitoringLocationDao) {
+        m_monitoringLocationDao = monitoringLocationDao;
+    }
+
+    public ApplicationDao getApplicationDao() {
+        return this.applicationDao;
+    }
+
+    public void setApplicationDao(final ApplicationDao applicationDao) {
+        this.applicationDao = applicationDao;
+    }
+
+    public AcknowledgmentDao getAcknowledgmentDao() {
+        return m_acknowledgmentDao;
+    }
+
+    public void setAcknowledgmentDao(final AcknowledgmentDao acknowledgmentDao) {
+        m_acknowledgmentDao = acknowledgmentDao;
+    }
+
+    public TransactionOperations getTransactionTemplate() {
+        return m_transOperation;
+    }
+
+    public void setTransactionTemplate(final TransactionOperations transactionOperation) {
+        m_transOperation = transactionOperation;
+    }
+}

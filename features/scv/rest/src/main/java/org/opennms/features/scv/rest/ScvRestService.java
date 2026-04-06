@@ -1,0 +1,79 @@
+/*
+ * Licensed to The OpenNMS Group, Inc (TOG) under one or more
+ * contributor license agreements.  See the LICENSE.md file
+ * distributed with this work for additional information
+ * regarding copyright ownership.
+ *
+ * TOG licenses this file to You under the GNU Affero General
+ * Public License Version 3 (the "License") or (at your option)
+ * any later version.  You may not use this file except in
+ * compliance with the License.  You may obtain a copy of the
+ * License at:
+ *
+ *      https://www.gnu.org/licenses/agpl-3.0.txt
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied.  See the License for the specific
+ * language governing permissions and limitations under the
+ * License.
+ */
+package org.opennms.features.scv.rest;
+
+import javax.ws.rs.Consumes;
+import javax.ws.rs.DELETE;
+import javax.ws.rs.GET;
+import javax.ws.rs.POST;
+import javax.ws.rs.PUT;
+import javax.ws.rs.Path;
+import javax.ws.rs.PathParam;
+import javax.ws.rs.Produces;
+import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
+
+@Path("/scv")
+public interface ScvRestService {
+
+    /**
+     * Get Credentials for an alias.
+     * If the alias is '_all', get the credentials for all aliases.
+     *
+     * @param alias alias for the credentials.
+     */
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    @Path("{alias}")
+    Response getCredentials(@PathParam("alias") String alias);
+
+    /**
+     * Get set of aliases
+     */
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    Response getAliases();
+
+
+    /**
+     * Add Credentials to Scv
+     *
+     * @param credentialsDTO Credentials with an alias
+     */
+    @POST
+    @Consumes({MediaType.APPLICATION_JSON})
+    Response addCredentials(CredentialsDTO credentialsDTO);
+
+    /**
+     * Add Credentials to Scv
+     *
+     * @param credentialsDTO Credentials with an alias
+     */
+    @PUT
+    @Consumes({MediaType.APPLICATION_JSON})
+    @Path("{alias}")
+    Response editCredentials(@PathParam("alias") String alias, CredentialsDTO credentialsDTO);
+
+    @DELETE
+    @Path("{alias}")
+    Response deleteCredentials(@PathParam("alias") String alias);
+}

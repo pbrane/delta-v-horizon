@@ -1,0 +1,271 @@
+/*
+ * Licensed to The OpenNMS Group, Inc (TOG) under one or more
+ * contributor license agreements.  See the LICENSE.md file
+ * distributed with this work for additional information
+ * regarding copyright ownership.
+ *
+ * TOG licenses this file to You under the GNU Affero General
+ * Public License Version 3 (the "License") or (at your option)
+ * any later version.  You may not use this file except in
+ * compliance with the License.  You may obtain a copy of the
+ * License at:
+ *
+ *      https://www.gnu.org/licenses/agpl-3.0.txt
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied.  See the License for the specific
+ * language governing permissions and limitations under the
+ * License.
+ */
+package org.opennms.web.rest.v1;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.opennms.core.test.xml.XmlTest.assertXpathMatches;
+
+import java.io.FileInputStream;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.GregorianCalendar;
+import java.util.TimeZone;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import javax.servlet.ServletContext;
+import javax.ws.rs.core.MediaType;
+import javax.xml.bind.DatatypeConverter;
+
+import org.apache.commons.io.IOUtils;
+import org.json.JSONObject;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.opennms.core.test.MockLogAppender;
+import org.opennms.core.test.OpenNMSJUnit4ClassRunner;
+import org.opennms.core.test.db.annotations.JUnitTemporaryDatabase;
+import org.opennms.core.test.rest.AbstractSpringJerseyRestTestCase;
+import org.opennms.core.utils.InetAddressUtils;
+import org.opennms.netmgt.dao.DatabasePopulator;
+import org.opennms.netmgt.dao.api.AlarmDao;
+import org.opennms.netmgt.dao.api.DistPollerDao;
+import org.opennms.netmgt.model.OnmsAlarm;
+import org.opennms.netmgt.model.OnmsSeverity;
+import org.opennms.test.JUnitConfigurationEnvironment;
+import org.skyscreamer.jsonassert.JSONAssert;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.web.WebAppConfiguration;
+import org.springframework.transaction.annotation.Transactional;
+
+@RunWith(OpenNMSJUnit4ClassRunner.class)
+@WebAppConfiguration
+@ContextConfiguration(locations={
+        "classpath:/META-INF/opennms/applicationContext-soa.xml",
+        "classpath:/META-INF/opennms/applicationContext-commonConfigs.xml",
+        "classpath:/META-INF/opennms/applicationContext-minimal-conf.xml",
+        "classpath:/META-INF/opennms/applicationContext-dao.xml",
+        "classpath:/META-INF/opennms/applicationContext-mockConfigManager.xml",
+        "classpath*:/META-INF/opennms/component-service.xml",
+        "classpath*:/META-INF/opennms/component-dao.xml",
+        "classpath:/META-INF/opennms/applicationContext-databasePopulator.xml",
+        "classpath:/META-INF/opennms/mockEventIpcManager.xml",
+        "file:src/main/webapp/WEB-INF/applicationContext-svclayer.xml",
+        "file:src/main/webapp/WEB-INF/applicationContext-cxf-common.xml",
+        "classpath:/applicationContext-rest-test.xml"
+})
+@JUnitConfigurationEnvironment(systemProperties = "org.opennms.timeseries.strategy=integration")
+@JUnitTemporaryDatabase
+@Transactional
+public class AlarmStatsRestServiceIT extends AbstractSpringJerseyRestTestCase {
+    private static final Logger LOG = LoggerFactory.getLogger(AlarmStatsRestServiceIT.class);
+
+    @Autowired
+    private DatabasePopulator m_databasePopulator;
+
+    @Autowired
+    private DistPollerDao m_distPollerDao;
+
+    @Autowired
+    private AlarmDao m_alarmDao;
+
+    @Autowired
+    private ServletContext m_servletContext;
+
+    private int m_eventCount = 0;
+
+    @Override
+    protected void afterServletStart() throws Exception {
+        m_eventCount = 0;
+        MockLogAppender.setupLogging(true, "DEBUG");
+        m_databasePopulator.populateDatabase();
+        for (final OnmsAlarm alarm : m_alarmDao.findAll()) {
+            m_alarmDao.delete(alarm);
+        }
+        m_alarmDao.flush();
+    }
+
+    @Test
+    public void testGetAlarmStats() throws Exception {
+        createAlarm(OnmsSeverity.CLEARED, "admin");
+        createAlarm(OnmsSeverity.MAJOR, "admin");
+        createAlarm(OnmsSeverity.CRITICAL, "admin");
+        createAlarm(OnmsSeverity.CRITICAL, null);
+        createAlarm(OnmsSeverity.MINOR, null);
+        createAlarm(OnmsSeverity.NORMAL, null);
+
+        final String xml = sendRequest(GET, "/stats/alarms", 200);
+
+        assertTrue(xml.contains(" totalCount=\"6\""));
+        assertTrue(xml.contains(" unacknowledgedCount=\"3\""));
+        assertTrue(xml.contains(" acknowledgedCount=\"3\""));
+    }
+
+    /**
+     * TODO: Doesn't test firstAutomationTime, lastAutomationTime, reductionKey,
+     * reductionKeyMemo, suppressedTime, suppressedUntil, clearKey, or stickyMemo
+     * fields.
+     */
+    @Test
+    @JUnitTemporaryDatabase
+    public void testGetAlarmStatsJson() throws Exception {
+        createAlarm(OnmsSeverity.CLEARED, "admin");
+        createAlarm(OnmsSeverity.MAJOR, "admin");
+        createAlarm(OnmsSeverity.CRITICAL, "admin");
+        createAlarm(OnmsSeverity.CRITICAL, null);
+        createAlarm(OnmsSeverity.MINOR, null);
+        createAlarm(OnmsSeverity.NORMAL, null);
+
+        // GET all users
+        MockHttpServletRequest jsonRequest = createRequest(m_servletContext, GET, "/stats/alarms");
+        jsonRequest.addHeader("Accept", MediaType.APPLICATION_JSON);
+        String json = sendRequest(jsonRequest, 200);
+
+        JSONObject restObject = new JSONObject(json);
+        JSONObject expectedObject = new JSONObject(IOUtils.toString(new FileInputStream("src/test/resources/v1/stats_alarms.json")));
+        JSONAssert.assertEquals(expectedObject, restObject, true);
+    }
+
+    @Test
+    public void testGetAlarmStatsBySeverity() throws Exception {
+        createAlarm(OnmsSeverity.CLEARED, "admin");
+        createAlarm(OnmsSeverity.MAJOR, "admin");
+        createAlarm(OnmsSeverity.CRITICAL, "admin");
+        createAlarm(OnmsSeverity.CRITICAL, null);
+        createAlarm(OnmsSeverity.MINOR, null);
+        createAlarm(OnmsSeverity.NORMAL, null);
+
+        final String xml = sendRequest(GET, "/stats/alarms", parseParamData("comparator=ge&severity=MAJOR"), 200);
+
+        assertTrue(xml.contains(" totalCount=\"3\""));
+        assertTrue(xml.contains(" unacknowledgedCount=\"1\""));
+        assertTrue(xml.contains(" acknowledgedCount=\"2\""));
+    }
+
+    @Test
+    public void testNewestAndOldestBySeverity() throws Exception {
+    	final OnmsAlarm oldestAckedAlarm   = createAlarm(OnmsSeverity.WARNING, "admin");
+    	final OnmsAlarm newestAckedAlarm   = createAlarm(OnmsSeverity.WARNING, "admin");
+    	final OnmsAlarm oldestUnackedAlarm = createAlarm(OnmsSeverity.WARNING, null);
+    	final OnmsAlarm newestUnackedAlarm = createAlarm(OnmsSeverity.WARNING, null);
+        
+        final String xml = sendRequest(GET, "/stats/alarms/by-severity", 200);
+
+        final String oldestAckedXml   = getXml("oldestAcked", xml);
+        final String newestAckedXml   = getXml("newestAcked", xml);
+        final String oldestUnackedXml = getXml("oldestUnacked", xml);
+        final String newestUnackedXml = getXml("newestUnacked", xml);
+
+        assertXpathMatches("should contain WARNING with ID#" + oldestAckedAlarm.getId(), oldestAckedXml, "//alarm[@severity='WARNING' and @id='" + oldestAckedAlarm.getId() + "']");
+        assertEquals("oldest acked XML firstEventTime", 1262322000000L, getFirstEventTime(oldestAckedXml).getTimeInMillis());
+
+        assertXpathMatches("should contain WARNING with ID#" + newestAckedAlarm.getId(), newestAckedXml, "//alarm[@severity='WARNING' and @id='" + newestAckedAlarm.getId() + "']");
+        assertEquals("newest acked XML firstEventTime", 1262325600000L, getFirstEventTime(newestAckedXml).getTimeInMillis());
+
+        assertXpathMatches("should contain WARNING with ID#" + oldestUnackedAlarm.getId(), oldestUnackedXml, "//alarm[@severity='WARNING' and @id='" + oldestUnackedAlarm.getId() + "']");
+        assertEquals("oldest unacked XML firstEventTime", 1262329200000L, getFirstEventTime(oldestUnackedXml).getTimeInMillis());
+
+        assertXpathMatches("should contain WARNING with ID#" + newestUnackedAlarm.getId(), newestUnackedXml, "//alarm[@severity='WARNING' and @id='" + newestUnackedAlarm.getId() + "']");
+        assertEquals("newest unacked XML firstEventTime", 1262332800000L, getFirstEventTime(newestUnackedXml).getTimeInMillis());
+    }
+
+    private Calendar getFirstEventTime(String xmlFragment) {
+        return DatatypeConverter.parseDateTime(xmlFragment.replaceFirst(".*<firstEventTime>(.*?)</firstEventTime>.*", "$1"));
+    }
+
+    private String getXml(final String tag, final String xml) {
+        final Pattern p = Pattern.compile("(<" + tag + ">.*?</" + tag + ">)", Pattern.DOTALL | Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
+        final Matcher m = p.matcher(xml);
+        if (m.find()) {
+            return m.group(1);
+        }
+        return "";
+    }
+
+    @Test
+    public void testGetAlarmStatsSeverityList() throws Exception {
+        createAlarm(OnmsSeverity.CLEARED, "admin");
+        createAlarm(OnmsSeverity.MAJOR, "admin");
+        createAlarm(OnmsSeverity.CRITICAL, "admin");
+        createAlarm(OnmsSeverity.CRITICAL, null);
+        createAlarm(OnmsSeverity.MINOR, null);
+        createAlarm(OnmsSeverity.NORMAL, null);
+
+        String xml = sendRequest(GET, "/stats/alarms/by-severity", 200);
+
+        assertTrue(xml.contains("<severities>"));
+        assertTrue(xml.contains("<alarmStatistics"));
+        assertTrue(xml.contains("severity="));
+        
+        xml = sendRequest(GET, "/stats/alarms/by-severity", parseParamData("severities=MINOR,NORMAL"), 200);
+        
+        assertFalse(xml.contains("CLEARED"));
+        assertFalse(xml.contains("CRITICAL"));
+        assertTrue(xml.contains("MINOR"));
+        assertTrue(xml.contains("NORMAL"));
+    }
+
+    private OnmsAlarm createAlarm(final OnmsSeverity severity, final String ackUser) {
+        final Calendar c = new GregorianCalendar();
+        c.set(2010, Calendar.JANUARY, 1, 0, 0, 0);
+        c.setTimeZone(TimeZone.getTimeZone("EST"));
+        c.set(Calendar.MILLISECOND, 0);
+        c.add(Calendar.HOUR_OF_DAY, m_eventCount);
+        final Date date = c.getTime();
+
+        final OnmsAlarm alarm = new OnmsAlarm();
+        alarm.setDistPoller(m_distPollerDao.whoami());
+        alarm.setUei("uei.opennms.org/test/" + m_eventCount);
+        alarm.setAlarmType(OnmsAlarm.PROBLEM_TYPE);
+        alarm.setNode(m_databasePopulator.getNode1());
+        alarm.setDescription("This is a test alarm");
+        alarm.setLogMsg("this is a test alarm log message");
+        alarm.setCounter(1);
+        alarm.setIpAddr(InetAddressUtils.UNPINGABLE_ADDRESS);
+        alarm.setSeverity(severity);
+        alarm.setFirstEventTime(date);
+        alarm.setLastEventTime(date);
+        alarm.setEventTsid((long) (m_eventCount + 1));
+        alarm.setEventUei("uei.opennms.org/test/" + m_eventCount);
+        alarm.setServiceType(m_databasePopulator.getServiceTypeDao().findByName("ICMP"));
+        alarm.setReductionKey("uei.opennms.org/test/" + m_eventCount + "::" + m_databasePopulator.getNode1().getId());
+
+        if (ackUser != null) {
+            alarm.setAlarmAckTime(new Date(1282329200000L));
+            alarm.setAlarmAckUser(ackUser);
+        }
+
+        m_eventCount++;
+
+        m_alarmDao.save(alarm);
+        m_alarmDao.flush();
+
+        LOG.debug("CreateAlarm: {}", alarm);
+
+        return alarm;
+    }
+}

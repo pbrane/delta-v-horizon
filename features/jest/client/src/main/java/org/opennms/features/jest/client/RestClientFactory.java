@@ -1,0 +1,356 @@
+/*
+ * Licensed to The OpenNMS Group, Inc (TOG) under one or more
+ * contributor license agreements.  See the LICENSE.md file
+ * distributed with this work for additional information
+ * regarding copyright ownership.
+ *
+ * TOG licenses this file to You under the GNU Affero General
+ * Public License Version 3 (the "License") or (at your option)
+ * any later version.  You may not use this file except in
+ * compliance with the License.  You may obtain a copy of the
+ * License at:
+ *
+ *      https://www.gnu.org/licenses/agpl-3.0.txt
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied.  See the License for the specific
+ * language governing permissions and limitations under the
+ * License.
+ */
+package org.opennms.features.jest.client;
+
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.security.KeyManagementException;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.SSLContext;
+
+import org.apache.http.HttpHost;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.Credentials;
+import org.apache.http.conn.ssl.NoopHostnameVerifier;
+import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
+import org.apache.http.impl.client.BasicCredentialsProvider;
+import org.apache.http.nio.conn.SchemeIOSessionStrategy;
+import org.apache.http.nio.conn.ssl.SSLIOSessionStrategy;
+import org.apache.http.ssl.SSLContextBuilder;
+import org.apache.http.ssl.TrustStrategy;
+import org.checkerframework.checker.units.qual.K;
+import org.opennms.core.mate.api.EntityScopeProvider;
+import org.opennms.features.jest.client.credentials.CredentialsParser;
+import org.opennms.features.jest.client.credentials.CredentialsProvider;
+import org.opennms.features.jest.client.executors.LimitedRetriesRequestExecutor;
+import org.opennms.features.jest.client.executors.RequestExecutor;
+import org.opennms.netmgt.events.api.EventForwarder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.common.base.Strings;
+import com.google.gson.FieldNamingPolicy;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.searchbox.client.AbstractJestClient;
+import io.searchbox.client.JestClient;
+import io.searchbox.client.JestClientFactory;
+import io.searchbox.client.config.HttpClientConfig;
+
+/**
+ * This factory wraps the {@link JestClientFactory} to provide instances of
+ * {@link JestClient}.
+ */
+public class RestClientFactory {
+	private static final Logger LOG = LoggerFactory.getLogger(RestClientFactory.class);
+
+	/**
+	 * Use the same formula used to compute the number of threads used in the Sink API.
+	 */
+	private static final int DEFAULT_MAX_TOTAL_CONNECTION_PER_ROUTE = Runtime.getRuntime().availableProcessors() * 2;
+
+	/**
+	 * Scale according to the number of connections per route.
+	 */
+	private static final int DEFAULT_MAX_TOTAL_CONNECTION = DEFAULT_MAX_TOTAL_CONNECTION_PER_ROUTE * 3;
+
+	private final HttpClientConfig.Builder clientConfigBuilder;
+	private int m_timeout = 0;
+	private int m_retries = 0;
+	private JestClient client;
+	private boolean httpCompression = false;
+	private Supplier<RequestExecutor> requestExecutorSupplier = () -> new LimitedRetriesRequestExecutor(m_timeout, m_retries);
+	private EntityScopeProvider entityScopeProvider;
+
+	public RestClientFactory(final String elasticSearchURL) throws MalformedURLException {
+		this(elasticSearchURL, null, null);
+	}
+
+	/**
+	 * Create a RestClientFactory.
+	 *
+	 * @param elasticSearchURL Elasticsearch URL, either a single URL or
+	 *   multiple URLs that are comma-separated without spaces
+	 * @param globalElasticUser Optional HTTP username
+	 * @param globalElasticPassword Optional HTTP password
+	 */
+	public RestClientFactory(final String elasticSearchURL, final String globalElasticUser, final String globalElasticPassword ) throws MalformedURLException {
+		final List<String> urls = parseUrl(elasticSearchURL);
+		final String globalUser = globalElasticUser != null && !globalElasticUser.isEmpty() ? globalElasticUser : null;
+		final String globalPassword = globalElasticPassword != null && !globalElasticPassword.isEmpty() ? globalElasticPassword : null;
+
+		// Ensure urls is set
+		if (urls.isEmpty()) {
+			throw new IllegalArgumentException("No urls have been provided");
+		}
+		final Gson gson = new GsonBuilder()
+				.setDateFormat(AbstractJestClient.ELASTIC_SEARCH_DATE_FORMAT)
+				.setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
+				.create();
+
+		// If multiple URLs are specified in a comma-separated string, split them up
+		clientConfigBuilder = new HttpClientConfig.Builder(urls)
+					.multiThreaded(true)
+					.defaultMaxTotalConnectionPerRoute(DEFAULT_MAX_TOTAL_CONNECTION_PER_ROUTE)
+					.maxTotalConnection(DEFAULT_MAX_TOTAL_CONNECTION)
+					.requestCompressionEnabled(httpCompression)
+					.gson(gson);
+
+		// Apply optional credentials
+		if (globalUser != null && globalPassword != null) {
+			clientConfigBuilder.defaultCredentials(globalUser, globalPassword);
+
+			// Enable preemptive auth
+			final Set<HttpHost> targetHosts = urls.stream()
+					.map(url -> {
+						try {
+							return new URL(url);
+						} catch (MalformedURLException ex) {
+							throw new RuntimeException(ex);
+						}
+					})
+					.map(url -> new HttpHost(url.getHost(), url.getPort(), url.getProtocol()))
+					.collect(Collectors.toSet());
+			clientConfigBuilder.preemptiveAuthTargetHosts(targetHosts);
+		}
+	}
+
+	public void setEntityScopeProvider(EntityScopeProvider entityScopeProvider) {
+		this.entityScopeProvider = entityScopeProvider;
+	}
+
+	public EntityScopeProvider getEntityScopeProvider() {
+		return this.entityScopeProvider;
+	}
+
+	/**
+	 * Set the number of times the REST operation will be retried if
+	 * an exception is thrown during the operation.
+	 * 
+	 * @param retries Number of retries.
+	 */
+	public void setRetries(int retries) {
+		m_retries = retries;
+	}
+
+	/**
+	 * Set the socket timeout (SO_TIMEOUT) for the REST connections. This is the
+	 * maximum period of inactivity while waiting for incoming data.
+	 * 
+	 * A default value of 3000 is specified in {@link io.searchbox.client.config.ClientConfig.AbstractBuilder<T, K >}.
+	 * 
+	 * @param timeout Timeout in milliseconds.
+	 */
+	public void setSocketTimeout(int timeout) {
+		setReadTimeout(timeout);
+	}
+
+	/**
+	 * Set the connection timeout for the REST connections. A default value 
+	 * of 3000 is specified in {@link io.searchbox.client.config.ClientConfig.AbstractBuilder<T,K>}.
+	 * 
+	 * This is also used as the minimum interval between successive retries
+	 * if the connection is refused in a shorter amount of time.
+	 * 
+	 * @param timeout Timeout in milliseconds.
+	 */
+	public void setTimeout(int timeout) {
+		setConnTimeout(timeout);
+	}
+
+	public void setConnTimeout(int timeout) {
+		m_timeout = timeout;
+		clientConfigBuilder.connTimeout(timeout);
+	}
+
+	public void setReadTimeout(int timeout) {
+		clientConfigBuilder.readTimeout(timeout);
+	}
+
+	public void setMultiThreaded(boolean multiThreaded) {
+		clientConfigBuilder.multiThreaded(multiThreaded);
+	}
+
+	/**
+	 * Set the default max connections per route.
+	 * By default, we use the number of available processors * 2.
+	 *
+	 * If a negative value is given, the set is ignored.
+	 * This allows us to use -1 as the default in the Blueprint in order
+	 * to avoid having to caculate the default again there.
+	 *
+	 * @param connections default max connections per route
+	 */
+	public void setDefaultMaxTotalConnectionPerRoute(int connections) {
+		if (connections < 0) {
+			// Ignore
+			return;
+		}
+		clientConfigBuilder.defaultMaxTotalConnectionPerRoute(connections);
+	}
+
+	/**
+	 * Set the default max total connections.
+	 * By default, we use the default max connections per route * 3.
+	 *
+	 * If a negative value is given, the set is ignored.
+	 * This allows us to use -1 as the default in the Blueprint in order
+	 * to avoid having to caculate the default again there.
+	 *
+	 * @param connections default max connections per route
+	 */
+	public void setMaxTotalConnection(int connections) {
+		if (connections < 0) {
+			// Ignore
+			return;
+		}
+		clientConfigBuilder.maxTotalConnection(connections);
+	}
+
+	/**
+	 * Defines if discovery/sniffing of nodes in the cluster is enabled.
+	 *
+	 * @param discovery true if discovery should be enabled, false otherwise
+	 */
+	public void setDiscovery(boolean discovery) {
+		clientConfigBuilder.discoveryEnabled(discovery);
+	}
+
+	/**
+	 * Sets the frequency to discover the nodes in the cluster.
+	 * Note: This only works if discovery is enabled.
+	 *
+	 * @param discoveryFrequencyInSeconds frequency in seconds
+	 */
+	public void setDiscoveryFrequency(int discoveryFrequencyInSeconds) {
+		clientConfigBuilder.discoveryFrequency(discoveryFrequencyInSeconds, TimeUnit.SECONDS);
+	}
+
+	public void setMaxConnectionIdleTime(int timeout, TimeUnit unit) {
+		clientConfigBuilder.maxConnectionIdleTime(timeout, unit);
+	}
+
+	public void setCredentials(final CredentialsProvider credentialsProvider) throws IOException {
+		if (credentialsProvider != null) {
+			final Map<AuthScope, Credentials> credentials = new CredentialsParser().parse(credentialsProvider.getCredentials(), getEntityScopeProvider());
+			if (!credentials.isEmpty()) {
+				final BasicCredentialsProvider customCredentialsProvider = new BasicCredentialsProvider();
+				clientConfigBuilder.credentialsProvider(customCredentialsProvider);
+				credentials.forEach((key, value) -> customCredentialsProvider.setCredentials(key, value));
+			} else {
+				LOG.warn("setCredentials was invoked, but no credentials or no valid credentials were provided.");
+			}
+		}
+	}
+
+	public void setProxy(String proxy) throws MalformedURLException {
+		if (!Strings.isNullOrEmpty(proxy)) {
+			final URL proxyURL = new URL(proxy);
+			clientConfigBuilder.proxy(new HttpHost(proxyURL.getHost(), proxyURL.getPort(), proxyURL.getProtocol()));
+		}
+	}
+
+	public void setHttpCompression(boolean httpCompression) {
+		this.httpCompression = httpCompression;
+	}
+
+	public void setRequestExecutorFactory(RequestExecutorFactory requestExecutorFactory) {
+		this.requestExecutorSupplier = () -> requestExecutorFactory.createExecutor(m_timeout, m_retries);
+	}
+
+	public void setRequestExecutorSupplier(Supplier<RequestExecutor> requestExecutorSupplier) {
+		this.requestExecutorSupplier = requestExecutorSupplier;
+	}
+
+	public JestClient createClient() {
+		if (this.client == null) {
+			final JestClientFactory factory = new JestClientFactory();
+			factory.setHttpClientConfig(this.clientConfigBuilder.build());
+
+			final RequestExecutor executor = requestExecutorSupplier.get();
+			this.client = new OnmsJestClient(factory.getObject(), executor);
+		}
+		return this.client;
+	}
+
+	public JestClientWithCircuitBreaker createClientWithCircuitBreaker(CircuitBreaker circuitBreaker, EventForwarder eventForwarder) {
+		final JestClientWithCircuitBreaker jestClientWithCircuitBreaker = new JestClientWithCircuitBreaker(createClient(), circuitBreaker);
+		jestClientWithCircuitBreaker.setEventForwarder(eventForwarder);
+		return jestClientWithCircuitBreaker;
+	}
+
+	private List<String> parseUrl(String elasticURL) {
+		if (elasticURL != null) {
+			final Set<String> endpoints = Arrays.stream(elasticURL.split(","))
+					.filter(url -> url != null && !url.trim().isEmpty())
+					.map(url -> url.trim()).collect(Collectors.toSet());
+			return new ArrayList<>(endpoints);
+		}
+		return Collections.emptyList();
+	}
+
+	/**
+	 * Allow insecure HTTPS/SSL connections.
+	 * @param ignoreCertificates
+	 */
+	public void setIgnoreCertificates(boolean ignoreCertificates) {
+		if(!ignoreCertificates) {
+			return;
+		}
+		try {
+			SSLContext sslContext = new SSLContextBuilder().loadTrustMaterial(null, new TrustStrategy() {
+				@Override
+				public boolean isTrusted(X509Certificate[] x509Certificates, String s) throws CertificateException {
+					return true;
+				}
+			}).build();
+			HostnameVerifier hostnameVerifier = NoopHostnameVerifier.INSTANCE;
+
+			SSLConnectionSocketFactory sslSocketFactory = new SSLConnectionSocketFactory(sslContext, hostnameVerifier);
+			SchemeIOSessionStrategy httpsIOSessionStrategy = new SSLIOSessionStrategy(sslContext, hostnameVerifier);
+			clientConfigBuilder.defaultSchemeForDiscoveredNodes("https");
+			clientConfigBuilder.sslSocketFactory(sslSocketFactory);
+			clientConfigBuilder.httpIOSessionStrategy(httpsIOSessionStrategy);
+			LOG.info("SSL Certificate validation ignored, connection is always trusted");
+		} catch (NoSuchAlgorithmException | KeyManagementException | KeyStoreException e) {
+			LOG.error("Exception while setting Ignore certificates", e);
+		}
+	}
+
+}

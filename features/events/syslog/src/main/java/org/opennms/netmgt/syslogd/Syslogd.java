@@ -1,0 +1,155 @@
+/*
+ * Licensed to The OpenNMS Group, Inc (TOG) under one or more
+ * contributor license agreements.  See the LICENSE.md file
+ * distributed with this work for additional information
+ * regarding copyright ownership.
+ *
+ * TOG licenses this file to You under the GNU Affero General
+ * Public License Version 3 (the "License") or (at your option)
+ * any later version.  You may not use this file except in
+ * compliance with the License.  You may obtain a copy of the
+ * License at:
+ *
+ *      https://www.gnu.org/licenses/agpl-3.0.txt
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied.  See the License for the specific
+ * language governing permissions and limitations under the
+ * License.
+ */
+package org.opennms.netmgt.syslogd;
+
+import java.io.IOException;
+import java.lang.reflect.UndeclaredThrowableException;
+
+import org.opennms.core.messagebus.IpcMessage;
+import org.opennms.core.messagebus.MessageBus;
+import org.opennms.core.messagebus.MessageHandler;
+import org.opennms.netmgt.daemon.AbstractServiceDaemon;
+import org.opennms.netmgt.events.api.EventConstants;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * <p>
+ * The received messages are converted into XML and sent to eventd.
+ * </p>
+ * <p>
+ * <strong>Note: </strong>Syslogd is a PausableFiber so as to receive control
+ * events. However, a 'pause' on Syslogd has no impact on the receiving and
+ * processing of syslog messages.
+ * </p>
+ * @author <a href="mailto:brozow@opennms.org">Mathew Brozowski</a>
+ * @author <a href="mailto:david@opennms.org">David Hustace</a>
+ * @author <a href="mailto:dj@opennms.org">DJ Gregor</a>
+ * @author <a href="mailto:joed@opennms.org">Johan Edstrom</a>
+ * @author <a href="mailto:mhuot@opennms.org">Mike Huot</a>
+ */
+public class Syslogd extends AbstractServiceDaemon implements MessageHandler {
+
+    private static final Logger LOG = LoggerFactory.getLogger(Syslogd.class);
+
+    /**
+     * The name of the logging category for Syslogd.
+     */
+    public static final String LOG4J_CATEGORY = "syslogd";
+
+    /** MessageBus type derived from uei.opennms.org/internal/reloadDaemonConfig */
+    private static final String MSG_TYPE_RELOAD_DAEMON_CONFIG = "reloadDaemonConfig";
+
+    private SyslogReceiver m_udpEventReceiver;
+
+    private final MessageBus m_messageBus;
+
+    /**
+     * <p>Constructor for Syslogd.</p>
+     */
+    public Syslogd(SyslogReceiver syslogReceiver, MessageBus messageBus) {
+        super(LOG4J_CATEGORY);
+        this.m_udpEventReceiver = syslogReceiver;
+        this.m_messageBus = messageBus;
+    }
+
+    public SyslogReceiver getSyslogReceiver() {
+        return m_udpEventReceiver;
+    }
+
+    public void setSyslogReceiver(SyslogReceiver receiver) {
+        m_udpEventReceiver = receiver;
+    }
+
+    /**
+     * <p>onInit</p>
+     */
+    @Override
+    protected void onInit() {
+        if (m_messageBus != null) {
+            m_messageBus.subscribe(MSG_TYPE_RELOAD_DAEMON_CONFIG, this);
+            LOG.info("Syslogd subscribed to MessageBus for IPC events");
+        } else {
+            LOG.warn("MessageBus not available — Syslogd will not receive IPC events via MessageBus");
+        }
+    }
+
+    /**
+     * <p>onStart</p>
+     */
+    @Override
+    protected void onStart() {
+        LOG.debug("Starting SyslogHandler");
+        Thread rThread = new Thread(m_udpEventReceiver, m_udpEventReceiver.getName());
+
+        try {
+            rThread.start();
+        } catch (RuntimeException e) {
+            rThread.interrupt();
+            throw e;
+        }
+    }
+
+    /**
+     * <p>onStop</p>
+     */
+    @Override
+    protected void onStop() {
+        if (m_udpEventReceiver != null) {
+            LOG.debug("stop: Stopping the Syslogd UDP receiver");
+            try {
+                m_udpEventReceiver.stop();
+            } catch (InterruptedException e) {
+                LOG.info("stop: Exception when stopping the Syslog UDP receiver: " + e.getMessage());
+            } catch (Throwable e) {
+                LOG.error("stop: Failed to stop the Syslog UDP receiver", e);
+                throw new UndeclaredThrowableException(e);
+            }
+            LOG.debug("stop: Stopped the Syslogd UDP receiver");
+        }
+    }
+
+    private void handleConfigurationChanged() {
+        stop();
+        try {
+            m_udpEventReceiver.reload();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        start();
+    }
+
+    // --- MessageHandler interface ---
+    // getName() is already defined by AbstractServiceDaemon and satisfies MessageHandler
+
+    @Override
+    public void onMessage(IpcMessage message) {
+        LOG.debug("Received IPC message: type={} source={}", message.getType(), message.getSource());
+        if (MSG_TYPE_RELOAD_DAEMON_CONFIG.equals(message.getType())) {
+            String daemonName = message.getParameter(EventConstants.PARM_DAEMON_NAME);
+            if (LOG4J_CATEGORY.equalsIgnoreCase(daemonName)) {
+                handleConfigurationChanged();
+            }
+        }
+    }
+
+}

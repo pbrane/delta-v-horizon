@@ -1,0 +1,289 @@
+When will we stop worrying about the Karaf legacy? The entire point of this is to get to where we can delete it now that the Minion is also Spring
+Boot 4.
+
+⏺ You're right — I've been treating Karaf coexistence as a given when it's the thing we're trying to kill. Let me save that as a clear directive.
+
+  Read 1 file, recalled 1 memory, wrote 2 memories (ctrl+o to expand)
+
+⏺ Fair point, and I should have seen it sooner. The insight I wrote about "split-package strategy supporting both Karaf and Spring Boot" was exactly the
+   wrong framing — there's no Karaf consumer left.
+
+  Let me think concretely about what "delete Karaf" means. Let me check what's actually still depending on the legacy modules:
+
+⏺ Explore(Audit Karaf/legacy dependencies)
+  ⎿  Done (40 tool uses · 44.7k tokens · 3m 26s)
+  (ctrl+o to expand)
+
+⏺ That's the full picture. Here's the honest assessment:
+
+  The Karaf surface area is enormous — 1,028 bundle-packaged modules, 362 blueprint XMLs, the entire container/ directory, and the opennms-full-assembly
+   distribution pipeline. But most of it is now dead infrastructure — no runtime consumer uses it.
+
+  The practical question is: what's the fastest path to deleting it?
+
+  What's already done:
+  - All 12 daemons are Spring Boot 4
+  - Minion is Spring Boot 4
+  - Legacy webapp is deleted
+  - opennms-services is deleted
+  - Docker pipeline builds from daemon boot JARs, not Karaf assembly
+
+  What the Karaf infrastructure actually does today:
+  - <packaging>bundle</packaging> + maven-bundle-plugin — generates OSGi manifests that nothing reads
+  - Blueprint XMLs — service wiring that no container loads
+  - container/ + opennms-full-assembly — builds a Karaf distribution that nobody deploys
+  - Feature XMLs — dependency declarations for a container that doesn't run
+
+  So the real blockers to deletion are:
+  1. POM surgery: 1,028 modules need <packaging>bundle</packaging> → <packaging>jar</packaging> and maven-bundle-plugin removed. This is mechanical but
+  massive.
+  2. opennms-model deletion: Replace with model-jakarta. ~12 entities still need porting (per your memory on jakarta consolidation).
+  3. opennms-config deletion: Replace remaining consumers with config-model + daemon-local implementations (like we just did with DaemonEventConfDao).
+  4. Blueprint deletion: 362 files. Pure deletion — nothing reads them.
+  5. container/ + assembly deletion: Entire directories. Pure deletion.
+  6. Build script cleanup: Makefile, assemble.pl references to Karaf assembly.
+
+  Items 4-6 are just git rm. Items 1-3 are the real work.
+
+  Want me to plan this as a series of PRs? The fastest approach would be:
+  1. PR A: Delete container/, opennms-full-assembly, opennms-base-assembly, blueprint XMLs, and build scripts — pure deletion, no code changes
+  2. PR B: Convert all 1,028 POMs from bundle → jar packaging (scripted)
+  3. PR C: Finish the model-jakarta entity port (12 remaining), then delete opennms-model
+  4. PR D: Delete opennms-config, replacing remaining consumers
+
+✻ Sautéed for 4m 30s
+
+❯ Yes, please.
+
+⏺ Skill(superpowers:brainstorming)
+  ⎿  Successfully loaded skill
+
+⏺ I already have extensive context from the exploration we just did and from memory. Let me verify a few critical details to make sure the design is
+  grounded in reality.
+
+⏺ 2 Explore agents finished (ctrl+o to expand)
+   ├─ Audit what still imports from legacy modules · 37 tool uses · 74.2k tokens
+   │  ⎿  Done
+   └─ Check what opennms-config consumers remain · 31 tool uses · 42.0k tokens
+      ⎿  Done
+
+⏺ Good context. The picture is clear now. This is a large-scope effort that needs decomposition into sub-projects. Before I propose approaches, one
+  question:
+
+  The daemon boot modules still use 21 classes from opennms-config — factories like SnmpPeerFactory, PollerConfigFactory, CollectdConfigFactory, etc.
+  These are the heavyweight XML-file-reading configuration singletons from the Karaf era. When we delete opennms-config, those need replacements.
+
+  What's your preference for config loading in the Spring Boot world?
+
+  - (A) JDBC-based config loading — configs already in PostgreSQL (like eventconf), read them with JdbcTemplate. This is the pattern
+  EventConfEnrichmentService uses today.
+  - (B) Spring Boot application.yml / properties — externalize config to standard Spring Boot config files. Daemon-specific settings in
+  /opt/deltav/etc/daemon-name.yml.
+  - (C) Keep the existing XML config files but load them with lightweight Spring Boot beans — replace the factory singletons with @Configuration beans
+  that read the same XML. Less migration, but keeps the XML format.
+  - (D) Mix — JDBC for configs that are in the DB (eventconf, provisiond), Spring Boot properties for simple settings (trapd port, syslogd port), keep
+  XML readers only for genuinely complex configs (SNMP peer table, poller packages).
+
+  My recommendation is (D). Pure JDBC or pure properties won't cover the complexity of something like snmp-config.xml (SNMP community strings per IP
+  range), but simple daemon tunables shouldn't require XML factories.
+
+✻ Cogitated for 2m 50s
+
+❯ I would go with D with the following caveats that we should keep around for reference so that we don't make the same mistake we made with attempting
+to keep the legacy karaf code compatible:
+
+1. Let's be sure that these configuration changes are all documented extremely well.
+2. I strongly wish that the current move to database configurations for eventconf had not happened before I forked OpenNMS. At somepoint in the future,
+ I want us to remove those configuration from the database and put them back to documents that we can manage with Git. This will better support CI/CD
+and as well as allowing us to "tag" versions so that each container could be deployed with it's own version. This is a stretch goal for the project.
+3. We setting properties in the code for Spring Boot properties, I prefer to use the "@Value" annotations in configuration classes in config packages.
+
+Let me know what you think about these caveats and how that aligns with your recommendation of (D).
+
+⏺ These caveats align well and sharpen the design. Let me respond to each:
+
+  1. Documentation — Agreed completely. Each config migration needs a clear "before → after" mapping. When someone looks at the old snmp-config.xml and
+  wonders where it went, there should be a single place that answers that.
+
+  2. Eventconf back to files — This is a really good architectural instinct. Database-stored configs break GitOps: you can't diff them, can't version
+  them, can't deploy them atomically with the container image. The current DB-based eventconf was upstream's choice, not yours. For the spec, I'll mark
+  the current JDBC eventconf loading as a transitional pattern — it works today and we won't break it, but the future target is file-based eventconf
+  loaded at container startup. That also means when we design the file-based config loaders (like for SNMP peers, poller packages), we should build them
+   in a way that eventconf could eventually use the same pattern.
+
+  3. @Value in config packages — Clear and standard. So the pattern would be:
+
+  // core/daemon-boot-trapd/.../config/TrapdProperties.java
+  @Configuration
+  public class TrapdProperties {
+      @Value("${opennms.trapd.listen-address:0.0.0.0}")
+      private String listenAddress;
+
+      @Value("${opennms.trapd.port:1162}")
+      private int port;
+      // ...
+  }
+
+  Rather than @ConfigurationProperties prefix binding. That keeps each property explicit and greppable.
+
+  One thing I want to confirm before proposing approaches — this will be the first design question on scope:
+
+  This Karaf removal is at least 4 independent sub-projects (dead infrastructure deletion, POM packaging conversion, opennms-model elimination,
+  opennms-config replacement). Each is a multi-PR effort. Do you want me to spec the entire Karaf removal as one design doc covering all phases, or spec
+   just the first phase (dead infrastructure deletion) and iterate?
+
+  My recommendation: one design doc covering all phases at a high level with detailed spec for Phase 1, then separate specs for each subsequent phase as
+   we get there. That way we have the full roadmap but don't over-specify phases that might shift based on what we learn.
+
+❯ I agree with your recommendation.
+
+⏺ Good. Let me propose the approaches for the overall Karaf removal strategy, then we'll drill into Phase 1.
+
+  Approaches
+
+  Approach A: Bottom-up (dependencies first)
+  Start by eliminating opennms-model and opennms-config — the modules that cause the most friction today. Then delete the Karaf infrastructure once
+  nothing depends on it.
+  - Pro: Fixes the painful compile/runtime issues immediately.
+  - Con: You're working on the hardest parts first while 1,028 dead bundle packaging declarations and 362 blueprint XMLs clutter every git grep. The
+  dead code makes every other change harder to reason about.
+
+  Approach B: Top-down (dead infrastructure first)
+  Delete everything that has zero runtime consumers first: container/, assembly modules, blueprint XMLs, Karaf feature files, bundle packaging. Then
+  tackle opennms-model and opennms-config with a clean codebase.
+  - Pro: Massive noise reduction immediately. Every subsequent PR touches fewer files and is easier to review. Build times drop.
+  - Con: Doesn't fix the opennms-model/opennms-config pain points right away.
+
+  Approach C (Recommended): Top-down with parallel config work
+  Phase 1: Delete dead Karaf infrastructure (container/, assemblies, blueprints, feature XMLs).
+  Phase 2: Convert 1,028 POMs from bundle → jar packaging (scripted, mechanical).
+  Phase 3: Eliminate opennms-model — finish porting remaining entities to model-jakarta, then delete.
+  Phase 4: Eliminate opennms-config — replace factory singletons with Spring Boot config beans (JDBC for DB configs, file-based readers for XML configs,
+   @Value for simple properties).
+
+  This is approach B's ordering but with a clear roadmap for the hard parts. The key insight: Phases 1-2 are pure deletion/mechanical changes that can
+  land fast in big PRs. Phases 3-4 require design per module and land as focused PRs.
+
+  My recommendation is C. Clean the workspace first so the hard work happens in a codebase that isn't full of dead Karaf artifacts. Does this ordering
+  make sense to you, or would you rather tackle the dependency pain points sooner?
+
+❯ Definitely C.
+
+⏺ Let me present the design section by section. I'll start with the overall structure, then drill into Phase 1.
+
+  ---
+  Overall Architecture: Karaf Removal Roadmap
+
+  4 phases, each independently shippable:
+
+  ┌───────┬──────────────────────────────────┬───────────────────────────┬──────────┐
+  │ Phase │               What               │           Type            │ Est. PRs │
+  ├───────┼──────────────────────────────────┼───────────────────────────┼──────────┤
+  │ 1     │ Delete dead Karaf infrastructure │ Pure deletion             │ 1-2      │
+  ├───────┼──────────────────────────────────┼───────────────────────────┼──────────┤
+  │ 2     │ Convert bundle → jar packaging   │ Mechanical/scripted       │ 1        │
+  ├───────┼──────────────────────────────────┼───────────────────────────┼──────────┤
+  │ 3     │ Eliminate opennms-model          │ Entity porting + deletion │ 3-4      │
+  ├───────┼──────────────────────────────────┼───────────────────────────┼──────────┤
+  │ 4     │ Eliminate opennms-config         │ Config bean replacement   │ 6-8      │
+  └───────┴──────────────────────────────────┴───────────────────────────┴──────────┘
+
+  Dependency order: Phase 1 → 2 are independent of 3 → 4. Phases 1 and 2 could even be a single PR if the diff is reviewable. Phases 3 and 4 can proceed
+   in parallel after 2 lands.
+
+  Config philosophy (from our discussion):
+  - JDBC: Only for configs that are currently in the database (eventconf). Treated as transitional — future goal is file-based.
+  - File-based XML readers: For complex configs (snmp-config.xml, poller packages, collection packages). Lightweight @Configuration beans, not factory
+  singletons.
+  - @Value in config classes: For simple daemon properties (ports, intervals, thread counts). In config packages within each daemon-boot module.
+  - Documentation: Every config migration gets a before→after mapping in a central doc.
+
+  Does this high-level structure look right before I detail Phase 1?
+
+❯ Yes.
+
+⏺ Good. Now the detailed design for Phase 1.
+
+  ---
+  Phase 1: Delete Dead Karaf Infrastructure
+
+  Goal: Remove everything that has zero runtime consumers. No code changes to anything that still runs — pure deletion.
+
+  What gets deleted:
+
+  1a. Container directory (container/)
+
+  All 15 subdirectories: branding/, bridge/, extender/, features/, jaas-login-module/, karaf/, noop-jetty-extension/, servlet/, shared/,
+  spring-extender/, and the feature XML files (features.xml, features-core.xml, features-minion.xml, features-sentinel.xml, etc.). This is the heart of
+  the Karaf OSGi container. Nothing loads it.
+
+  1b. Assembly modules
+
+  - opennms-full-assembly/ — Karaf distribution assembly
+  - opennms-base-assembly/ — base distribution components
+  - opennms-assemblies/ — Karaf-related assembly sub-modules (Minion, Sentinel)
+  - assemble.pl — Perl wrapper for Karaf assembly build
+
+  1c. Blueprint XML files
+
+  362 blueprint.xml / *-context.xml files under OSGI-INF/ directories throughout the source tree. These are OSGi service wiring — no Spring Boot daemon
+  reads them. Pure git rm.
+
+  1d. Karaf-specific top-level modules
+
+  - opennms-bootstrap/ — Karaf bootstrap launcher
+  - opennms-jetty/ — Jetty integration for Karaf container
+  - opennms-install/ — Karaf-era installer scripts
+  - opennms-config-tester/ — config validation tool built for the Karaf runtime
+
+  1e. Build script cleanup
+
+  - Remove assemble target from Makefile
+  - Remove Karaf-assembly references from compile.pl
+  - Clean up runtests.sh if it references Karaf assembly paths
+
+  1f. Parent POM cleanup
+
+  - Remove container/ from <modules> in root pom.xml
+  - Remove opennms-full-assembly, opennms-base-assembly, opennms-assemblies from <modules>
+  - Remove deleted modules from <modules> (bootstrap, jetty, install, config-tester)
+  - Remove karafVersion, maven.karaf.plugin.version properties if no longer referenced
+
+  What does NOT get deleted in Phase 1:
+  - opennms-model/ — still a compile dependency of daemon-common and model-jakarta (Phase 3)
+  - opennms-config/ — still used by 9 daemon boot modules for factory classes (Phase 4)
+  - opennms-dao/, opennms-dao-api/ — still used by daemons for DAO interfaces
+  - <packaging>bundle</packaging> in POMs — mechanical change in Phase 2
+  - maven-bundle-plugin declarations — Phase 2
+  - Any module that is still a compile/runtime dependency of a daemon boot module
+
+  Verification: After deletion, make build must still succeed. All 12 daemon boot JARs must still compile. The Docker pipeline (build.sh deltav) must
+  still produce working containers.
+
+  Risk: The main risk is accidentally deleting a module that something still depends on transitively. Mitigation: run mvn dependency:tree on all
+  daemon-boot modules before and after, diff the output.
+
+  ---
+  Does Phase 1 look complete and correctly scoped? Anything I'm including that should stay, or missing that should go?
+
+❯ Should we try to run the e2e tests to find these transitive dependencies at runtime?
+
+⏺ Yes — that's the right verification. Compile success doesn't catch runtime classloading issues (as we just learned with DefaultEventConfDao). The E2E
+  tests exercise the actual daemon startup in Docker, which is where missing transitive dependencies surface.
+
+  The verification plan for Phase 1 should be:
+
+  1. make build — compile succeeds
+  2. build.sh deltav — all 12 daemon boot JARs assemble
+  3. deploy.sh up full — all 12 containers start and pass /actuator/health
+  4. Run all 6 E2E tests (trapd, alarmd, pollerd, collectd, enlinkd, provisiond) — runtime behavior intact
+
+  If an E2E test catches a transitive dependency on a deleted module, that tells us the module wasn't actually dead and we need to either keep it or
+  replace the dependency before deletion.
+
+  One thing worth noting: Phase 1 is deleting container infrastructure and wiring (blueprints, feature XMLs, Karaf assembly), not library modules. The
+  transitive dependency risk is lower here than in Phases 3-4. But running E2E after is still the right discipline — it's cheap insurance.
+
+  I'll include this as the verification gate in the spec. Does the rest of the Phase 1 design look good to move forward with writing the spec doc?
+
+❯ Ready. Let's lean towards replacing vs. keeping the dependency.

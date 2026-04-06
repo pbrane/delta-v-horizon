@@ -1,0 +1,152 @@
+
+= Secure Credentials Vault
+:description: Learn how to configure the secure credentials vault to encrypt the credentials that {page-component-title} uses.
+
+The secure credentials vault lets you encrypt credentials that {page-component-title} uses.
+It stores them in the Java keystore (JKS) format.
+
+The secure credentials vault is enabled by default.
+
+== Configure keystore type and file name
+OpenNMS supports two keystore types: `JCEKS` and `PKCS12`. You can customize keystore type by setting the appropriate properties in:
+`$\{OPENNMS_HOME}/etc/opennms.properties.d/scv.properties.`
+
+[source, plain]
+----
+org.opennms.features.scv.keystore.type=PKCS12
+----
+
+NOTE: If you want to convert the `PKCS12` keystore format instead of `JCEKS`, be sure to update the file extension to match the new format (e.g., use `.pk12` instead of `.jce`).
+You can convert a `JCEKS` file to `PKCS12` using the following command.
+[source, console]
+----
+keytool -importkeystore -srckeystore $OPENNMS_HOME/etc/scv.jce -destkeystore $OPENNMS_HOME/etc/scv.pk12 -deststoretype pkcs12
+----
+
+== Configure password
+
+You can configure a custom password for the secure credentials vault by editing `org.opennms.features.scv.jceks.key` in `$\{OPENNMS_HOME}/etc/opennms.properties.d/svc.properties`.
+
+IMPORTANT: You cannot change the secure credentials vault password after credentials have been stored.
+You must delete `$\{OPENNMS_HOME}/etc/scv.jce` and manually re-add any credentials if you want to change the password after the file has been created.
+
+The secure credentials vault keystore file is located in `$\{OPENNMS_HOME}/etc/scv.jce`.
+
+== Store credentials
+
+Entries in the SCV are identified by aliases.
+For each alias, you can store a username, a password, and a set of key-value pair attributes.
+
+To access or add credentials, click menu:Tools[Secure Credentials Vault] in the side menu.
+
+NOTE: You must be logged in with a `ROLE_ADMIN` role to view or change SCV credentials.
+
+== Access entries
+
+=== Metadata expressions
+
+You can access entries in the secure credentials vault from metadata using the `scv` context.
+
+[caption=]
+.Example metadata expressions
+[options="autowidth"]
+|===
+| Expression    | Description
+
+| ${scv:juniper-vm:username}
+| Accesses the username from the `juniper-vm` alias.
+
+| ${scv:juniper-vm:password}
+| Accesses the password from the `juniper-vm` alias.
+
+| ${scv:juniper-vm:user1}
+| Accesses the `user1` property from the `juniper-vm` alias.
+
+| ${scv:corp-directory:domain}
+| Accesses the `domain` property from the `corp-directory` alias.
+|===
+
+=== Karaf commands
+
+You can access and update entries in the secure credentials vault from the xref:reference:karaf-shell/karaf-shell.adoc[Karaf shell].
+To do so, follow these steps:
+
+. Open an SSH session:
++
+[source, console]
+ssh -p 8101 admin@localhost
+
+. Access or update secure credentials vault entries using the shell.
+** Set credentials:
++
+[source, karaf]
+----
+admin@opennms()> scv-set --help
+DESCRIPTION
+        opennms:scv-set
+
+	Sets and securely store the credentials for the given alias.
+
+SYNTAX
+        opennms:scv-set alias username password
+
+ARGUMENTS
+        alias
+                Alias used to retrieve the credentials.
+                (required)
+        username
+                Username to store.
+                (required)
+        password
+                Password to store.
+                (required)
+
+----
+
+** List all aliases:
++
+[source, karaf]
+----
+admin@opennms()> scv-list --help
+DESCRIPTION
+        opennms:scv-list
+
+	Retrieves all alias names.
+
+SYNTAX
+        opennms:scv-list
+
+----
+
+** Access secure credentials vault entries by alias:
++
+[source, karaf]
+----
+admin@opennms()> scv-get --help
+DESCRIPTION
+        opennms:scv-get
+
+	Retrieves the username and attributes for the given alias.
+
+SYNTAX
+        opennms:scv-get alias
+
+ARGUMENTS
+        alias
+                Alias used to retrieve the credentials.
+                (required)
+----
+
+** Access secure credentials vault entries for any aliases:
++
+[source, karaf]
+----
+admin@opennms()> scv-get-all --help
+DESCRIPTION
+        opennms:scv-get-all
+
+	Retrieves the username and attributes for all aliases.
+
+SYNTAX
+        opennms:scv-get-all
+----

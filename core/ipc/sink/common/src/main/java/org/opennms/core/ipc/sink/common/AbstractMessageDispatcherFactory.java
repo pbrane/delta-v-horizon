@@ -1,0 +1,197 @@
+/*
+ * Licensed to The OpenNMS Group, Inc (TOG) under one or more
+ * contributor license agreements.  See the LICENSE.md file
+ * distributed with this work for additional information
+ * regarding copyright ownership.
+ *
+ * TOG licenses this file to You under the GNU Affero General
+ * Public License Version 3 (the "License") or (at your option)
+ * any later version.  You may not use this file except in
+ * compliance with the License.  You may obtain a copy of the
+ * License at:
+ *
+ *      https://www.gnu.org/licenses/agpl-3.0.txt
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied.  See the License for the specific
+ * language governing permissions and limitations under the
+ * License.
+ */
+package org.opennms.core.ipc.sink.common;
+
+import java.util.Dictionary;
+import java.util.Hashtable;
+import java.util.Objects;
+
+import org.opennms.core.ipc.sink.aggregation.AggregatingSinkMessageProducer;
+import org.opennms.core.ipc.sink.api.AsyncDispatcher;
+import org.opennms.core.ipc.sink.api.Message;
+import org.opennms.core.ipc.sink.api.MessageDispatcherFactory;
+import org.opennms.core.ipc.sink.api.SinkModule;
+import org.opennms.core.ipc.sink.api.SyncDispatcher;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.ServiceRegistration;
+
+import com.codahale.metrics.jmx.JmxReporter;
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.MetricSet;
+import com.codahale.metrics.Timer.Context;
+
+import io.opentracing.Scope;
+import io.opentracing.Tracer;
+
+/**
+ * This class does all the hard work of building and maintaining the state of the message
+ * dispatchers so that concrete implementations only need to focus on dispatching the messages.
+ *
+ * Different types of dispatchers are created based on whether or not the module is using aggregation.
+ *
+ * Asynchronous dispatchers use a queue and a thread pool to delegate to a suitable synchronous dispatcher.
+ *
+ * @author jwhite
+ *
+ * @param <W> type of module specific state or meta-data, use <code>Void</code> if none is used
+ */
+public abstract class AbstractMessageDispatcherFactory<W> implements MessageDispatcherFactory {
+
+    private JmxReporter metricsJmxRepoter = null;
+
+    private ServiceRegistration<MetricSet> metricsServiceRegistration = null;
+
+    public abstract <S extends Message, T extends Message> void dispatch(SinkModule<S, T> module, W metadata, T message);
+
+    public abstract String getMetricDomain();
+
+    public abstract BundleContext getBundleContext();
+
+    public abstract Tracer getTracer();
+
+    public abstract MetricRegistry getMetrics();
+
+    /**
+     * Invokes dispatch within a timer context.
+     */
+    private <S extends Message, T extends Message> void timedDispatch(DispatcherState<W, S,T> state, T message) {
+        try (Context ctx = state.getDispatchTimer().time();
+             Scope scope = getTracer().buildSpan(state.getModule().getId()).startActive(true)) {
+            dispatch(state.getModule(), state.getMetaData(), message);
+        }
+    }
+
+    /**
+     * Optionally build meta-data or state information for the module which will
+     * be passed on all the calls to {@link #dispatch}.
+     *
+     * This is useful for calculating things like message headers which are
+     * re-used on every dispatch.
+     *
+     * @param module
+     * @return
+     */
+    public <S extends Message, T extends Message> W getModuleMetadata(SinkModule<S, T> module) {
+        return null;
+    }
+
+    @Override
+    public <S extends Message, T extends Message> SyncDispatcher<S> createSyncDispatcher(SinkModule<S, T> module) {
+        Objects.requireNonNull(module, "module cannot be null");
+        final DispatcherState<W,S,T> state = new DispatcherState<>(this, module);
+        return createSyncDispatcher(state);
+    }
+
+    @Override
+    public <S extends Message, T extends Message> AsyncDispatcher<S> createAsyncDispatcher(SinkModule<S, T> module) {
+        Objects.requireNonNull(module, "module cannot be null");
+        Objects.requireNonNull(module.getAsyncPolicy(), "module must have an AsyncPolicy");
+        final DispatcherState<W,S,T> state = new DispatcherState<>(this, module);
+        final SyncDispatcher<S> syncDispatcher = createSyncDispatcher(state);
+        return new AsyncDispatcherImpl<>(state, module.getAsyncPolicy(), syncDispatcher);
+    }
+
+    protected <S extends Message, T extends Message> SyncDispatcher<S> createSyncDispatcher(DispatcherState<W,S,T> state) {
+        final SinkModule<S,T> module = state.getModule();
+        if (module.getAggregationPolicy() != null) {
+            // Aggregate the message before dispatching them
+            return new AggregatingSinkMessageProducer<S,T>(module) {
+                @Override
+                public void dispatch(T message) {
+                    AbstractMessageDispatcherFactory.this.timedDispatch(state, message);
+                }
+                @Override
+                public void close() throws Exception {
+                    super.close();
+                    state.close();
+                }
+
+            };
+        } else {
+            // No aggregation strategy is set, dispatch directly to reduce overhead
+            return new DirectDispatcher<>(state);
+        }
+    }
+
+    private class DirectDispatcher<S extends Message, T extends Message> implements SyncDispatcher<S> {
+        private final DispatcherState<W, S, T> state;
+
+        public DirectDispatcher(DispatcherState<W, S,T> state) {
+            this.state = state;
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public void send(S message) {
+            // Cast S to T, modules that do not use an AggregationPolicty
+            // must have the same types for S and T
+            AbstractMessageDispatcherFactory.this.timedDispatch(state, (T) message);
+        }
+
+        @Override
+        public void close() throws Exception {
+            state.close();
+        }
+    }
+
+
+    public void onInit() {
+        registerJmxReporterForMetrics();
+        maybeRegisterMetricSetInServiceRegistry();
+    }
+
+    public void onDestroy() {
+        unregisterJmxReporterForMetrics();
+        unregisterMetricSetInServiceRegistry();
+    }
+
+    private void registerJmxReporterForMetrics() {
+        metricsJmxRepoter = JmxReporter.forRegistry(getMetrics())
+                    .inDomain(getMetricDomain())
+                    .build();
+        metricsJmxRepoter.start();
+    }
+
+    private void unregisterJmxReporterForMetrics() {
+        if (metricsJmxRepoter != null) {
+            metricsJmxRepoter.close();
+            metricsJmxRepoter = null;
+        }
+    }
+
+    private void maybeRegisterMetricSetInServiceRegistry() {
+        final BundleContext bundleContext = getBundleContext();
+        if (bundleContext != null) {
+            final Dictionary<String,Object> props = new Hashtable<>();
+            props.put("name", getMetricDomain());
+            props.put("description", "Sink API Related Metrics for " + getMetricDomain());
+            metricsServiceRegistration = bundleContext.registerService(MetricSet.class, getMetrics(), props);
+        }
+    }
+
+    private void unregisterMetricSetInServiceRegistry() {
+        if (metricsServiceRegistration != null) {
+            metricsServiceRegistration.unregister();
+            metricsServiceRegistration = null;
+        }
+    }
+}

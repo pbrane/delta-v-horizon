@@ -1,0 +1,339 @@
+/*
+ * Licensed to The OpenNMS Group, Inc (TOG) under one or more
+ * contributor license agreements.  See the LICENSE.md file
+ * distributed with this work for additional information
+ * regarding copyright ownership.
+ *
+ * TOG licenses this file to You under the GNU Affero General
+ * Public License Version 3 (the "License") or (at your option)
+ * any later version.  You may not use this file except in
+ * compliance with the License.  You may obtain a copy of the
+ * License at:
+ *
+ *      https://www.gnu.org/licenses/agpl-3.0.txt
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied.  See the License for the specific
+ * language governing permissions and limitations under the
+ * License.
+ */
+package org.opennms.netmgt.syslogd;
+
+import static org.awaitility.Awaitility.await;
+import static junit.framework.TestCase.assertFalse;
+import static org.hamcrest.Matchers.equalTo;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.DatagramPacket;
+import java.net.InetAddress;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.Mockito;
+import org.opennms.core.test.ConfigurationTestUtils;
+import org.opennms.core.test.MockLogAppender;
+import org.opennms.core.test.OpenNMSJUnit4ClassRunner;
+import org.opennms.core.test.db.annotations.JUnitTemporaryDatabase;
+import org.opennms.core.utils.InetAddressUtils;
+import org.opennms.netmgt.config.SyslogdConfigFactory;
+import org.opennms.netmgt.dao.DatabasePopulator;
+import org.opennms.netmgt.dao.api.DistPollerDao;
+import org.opennms.netmgt.dao.api.InterfaceToNodeCache;
+import org.opennms.netmgt.dao.mock.EventAnticipator;
+import org.opennms.netmgt.dao.mock.MockEventIpcManager;
+import org.opennms.netmgt.dao.support.InterfaceToNodeCacheEventProcessor;
+import org.opennms.netmgt.events.api.EventConstants;
+import org.opennms.netmgt.events.api.model.ImmutableMapper;
+import org.opennms.netmgt.model.OnmsDistPoller;
+import org.opennms.netmgt.model.events.EventBuilder;
+import org.opennms.netmgt.provision.LocationAwareDnsLookupClient;
+import org.opennms.netmgt.syslogd.api.SyslogConnection;
+import org.opennms.netmgt.syslogd.api.SyslogMessageLogDTO;
+import org.opennms.netmgt.xml.event.Event;
+import org.opennms.test.JUnitConfigurationEnvironment;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.ContextConfiguration;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.codahale.metrics.MetricRegistry;
+
+@RunWith(OpenNMSJUnit4ClassRunner.class)
+@ContextConfiguration(locations={
+        "classpath:/META-INF/opennms/applicationContext-commonConfigs.xml",
+        "classpath:/META-INF/opennms/applicationContext-minimal-conf.xml",
+        "classpath:/META-INF/opennms/applicationContext-soa.xml",
+        "classpath:/META-INF/opennms/applicationContext-dao.xml",
+        "classpath:/META-INF/opennms/applicationContext-mockConfigManager.xml",
+        "classpath:/META-INF/opennms/applicationContext-eventUtil.xml",
+        "classpath:/META-INF/opennms/applicationContext-daemon.xml",
+        "classpath:/META-INF/opennms/applicationContext-databasePopulator.xml",
+        "classpath:/META-INF/opennms/applicationContext-eventDaemon.xml",
+        "classpath:/META-INF/opennms/mockSinkConsumerManager.xml",
+        "classpath:/META-INF/opennms/applicationContext-daoEvents.xml",
+        "classpath:/META-INF/opennms/mockEventIpcManager.xml"
+})
+@JUnitConfigurationEnvironment
+@JUnitTemporaryDatabase
+public class SyslogSinkConsumerNewSuspectIT {
+
+    private static final Logger LOG = LoggerFactory.getLogger(SyslogSinkConsumerNewSuspectIT.class);
+
+    @Autowired
+    private InterfaceToNodeCache m_cache;
+
+    @Autowired
+    private InterfaceToNodeCacheEventProcessor m_processor;
+
+    @Autowired
+    private DatabasePopulator m_databasePopulator;
+
+    @Autowired
+    private MockEventIpcManager m_eventIpcManager;
+
+    @Autowired
+    private DistPollerDao m_distPollerDao;
+
+    private SyslogSinkConsumer m_syslogSinkConsumer;
+
+    private SyslogSinkModule m_syslogSinkModule;
+
+    private final EventAnticipator m_anticipator = new EventAnticipator();
+
+    @Before
+    public void setUp() throws Exception {
+        MockLogAppender.setupLogging(true, "DEBUG");
+
+        // Populate the database but don't sync the InterfaceToNodeCache until we're
+        // inside each test so that we can test different behaviors
+        m_databasePopulator.populateDatabase();
+
+        m_eventIpcManager.addEventListener(m_anticipator);
+
+        // Create a mock SyslogdConfig
+        SyslogdConfigFactory config = loadSyslogConfiguration("/etc/syslogd-rfc-configuration.xml");
+
+        m_syslogSinkConsumer = new SyslogSinkConsumer(new MetricRegistry(), null, config, m_distPollerDao, m_eventIpcManager, null);
+        m_syslogSinkModule = m_syslogSinkConsumer.getModule();
+    }
+
+    @After
+    public void tearDown() {
+        m_cache.clear();
+    }
+
+    private SyslogdConfigFactory loadSyslogConfiguration(final String configuration) throws IOException {
+        try (InputStream stream = ConfigurationTestUtils.getInputStreamForResource(this, configuration)) {
+            return new SyslogdConfigFactory(stream);
+        }
+    }
+
+    @Test
+    @Transactional
+    public void testUpdateInterfaceToNodeCache() throws Exception {
+
+        // The cache has not been sync'd with the database yet
+        assertEquals(0, m_cache.size());
+
+        final Integer nodeId = m_databasePopulator.getNode1().getId();
+        // One of the interfaces on node1
+        final InetAddress addr = InetAddressUtils.addr("192.168.1.3");
+
+        final byte[] bytes = ("<34>1 2010-08-19T22:14:15.000Z " + InetAddressUtils.str(addr) + " - - - - \uFEFFfoo0: load test 0 on tty1\0").getBytes();
+        final DatagramPacket pkt = new DatagramPacket(bytes, bytes.length, addr, SyslogClient.PORT);
+
+        // Create a new SyslogConnection and call it to create the processed event
+        Event e = dispatchAndCapture(new SyslogConnection(pkt, false));
+
+        // The node is not present so nodeID should be blank
+        Long foundid = e.getNodeid();
+        LOG.debug("Found node ID: {}", foundid);
+        assertTrue("Node ID was unexpectedly present: " + e.getNodeid(), foundid < 1);
+
+        // Simulate a nodeGainedInterface event
+        EventBuilder builder = new EventBuilder(EventConstants.NODE_GAINED_INTERFACE_EVENT_UEI, getClass().getSimpleName());
+        builder.setNodeid(nodeId);
+        builder.setInterface(addr);
+        m_processor.handleNodeGainedInterface(ImmutableMapper.fromMutableEvent(builder.getEvent()));
+
+        // The entry was added to the cache
+        assertEquals(1, m_cache.size());
+
+        e = dispatchAndCapture(new SyslogConnection(pkt, false));
+
+        // Assert that the event was associated with the node correctly
+        foundid = e.getNodeid();
+        LOG.debug("Found node ID: {}", foundid);
+        assertEquals("Node ID was not present: " + e.getNodeid(), Long.valueOf(nodeId.longValue()), foundid);
+
+        // Simulate an interfaceDeleted event
+        builder = new EventBuilder(EventConstants.INTERFACE_DELETED_EVENT_UEI, getClass().getSimpleName());
+        builder.setNodeid(nodeId);
+        builder.setInterface(addr);
+        m_processor.handleInterfaceDeleted(ImmutableMapper.fromMutableEvent(builder.getEvent()));
+
+        // The entry was removed from the cache
+        assertEquals(0, m_cache.size());
+
+        e = dispatchAndCapture(new SyslogConnection(pkt, false));
+
+        // Assert that the event is no longer associated with the node
+        assertTrue("Node ID was unexpectedly present: " + e.getNodeid(), e.getNodeid() < 1);
+    }
+
+    @Test
+    @Transactional
+    public void testSyncWithDatabaseThenClear() throws Exception {
+        // The cache has not been sync'd with the database yet
+        assertEquals(0, m_cache.size());
+
+        final Integer nodeId = m_databasePopulator.getNode1().getId();
+        // One of the interfaces on node1
+        final InetAddress addr = InetAddressUtils.addr("192.168.1.3");
+
+        final byte[] bytes = ("<34>1 2010-08-19T22:14:15.000Z " + InetAddressUtils.str(addr) + " - - - - \uFEFFfoo0: load test 0 on tty1\0").getBytes();
+        final DatagramPacket pkt = new DatagramPacket(bytes, bytes.length, addr, SyslogClient.PORT);
+
+        // Sync the cache with the database
+        m_cache.dataSourceSync();
+
+        // The cache has entries from the database
+        assertTrue(0 < m_cache.size());
+
+        // Create a new SyslogConnection and call it to create the processed event
+        Event e = dispatchAndCapture(new SyslogConnection(pkt, false));
+        // The node is in the database so it should already be in the cache
+        Long foundid = e.getNodeid();
+        LOG.debug("Found node ID: {}", foundid);
+        assertEquals("Node ID was not present: " + e.getNodeid(), Long.valueOf(nodeId.longValue()), foundid);
+
+        // Clear the cache
+        m_cache.clear();
+        assertEquals(0, m_cache.size());
+
+        // Create a new SyslogConnection and call it to create the processed event
+        e = dispatchAndCapture(new SyslogConnection(pkt, false));
+        // The node is in the database so it should already be in the cache
+        foundid = e.getNodeid();
+        LOG.debug("Found node ID: {}", foundid);
+        assertTrue("Node ID was unexpectedly present: " + e.getNodeid(), foundid < 1);
+    }
+
+    /**
+     * Enables `new-suspect-on-message` and tests that a valid syslog message will produce new suspect event.
+     * When syslog message has invalid interface will not produce new suspect event.
+     * @throws Exception
+     */
+    @Test
+    @Transactional
+    public void testInvalidInterfaceWillNotProduceNewSuspectEvent() throws Exception {
+
+        // Overwrite with new config by enabling new suspect on message flag.
+        SyslogdConfigFactory config = loadSyslogConfiguration("/etc/syslogd-new-suspect-enable-configuration.xml");
+        // Create new consumer and module with the new config.
+        SyslogSinkConsumer syslogSinkConsumer = new SyslogSinkConsumer(new MetricRegistry(), null, config, m_distPollerDao, m_eventIpcManager, null);
+        SyslogSinkModule syslogSinkModule = syslogSinkConsumer.getModule();
+        // One of the interfaces on node1
+        final InetAddress addr = InetAddressUtils.addr("192.168.1.3");
+
+        // This is a valid syslog message with valid interface.
+        byte[] bytes = ("<34>1 2010-08-19T22:14:15.000Z " + InetAddressUtils.str(addr) + " - - - - \uFEFFfoo0: load test 0 on tty1\0").getBytes();
+        DatagramPacket pkt = new DatagramPacket(bytes, bytes.length, addr, SyslogClient.PORT);
+
+        // Create a new SyslogConnection and call it to create the processed event
+        SyslogMessageLogDTO messageLog = syslogSinkModule.toMessageLog(new SyslogConnection(pkt, false));
+        // Dispatch
+        syslogSinkConsumer.handleMessage(messageLog);
+        // Capture
+        await().until(() -> m_anticipator.getUnanticipatedEvents().size(), equalTo(2));
+        List<Event> events = m_anticipator.getUnanticipatedEvents();
+        assertEquals(2, events.size());
+        // One of the events should be New Suspect.
+        assertTrue(events.stream().anyMatch(event -> event.getUei().equals(EventConstants.NEW_SUSPECT_INTERFACE_EVENT_UEI)));
+        m_anticipator.reset();
+
+        // Syslog message without a valid host (NotAHost), shouldn't create new suspect event.
+        
+        bytes = ("<34>1 2010-08-19T22:14:15.000Z " + "NotAHost" + " - - - - \uFEFFfoo0: load test 0 on tty1\0").getBytes();
+        pkt = new DatagramPacket(bytes, bytes.length, addr, SyslogClient.PORT);
+        // Create a new SyslogConnection and call it to create the processed event
+        messageLog = syslogSinkModule.toMessageLog(new SyslogConnection(pkt, false));
+        // Dispatch
+        syslogSinkConsumer.handleMessage(messageLog);
+        // Capture
+        await().until(() -> m_anticipator.getUnanticipatedEvents().size(), equalTo(1));
+        events = m_anticipator.getUnanticipatedEvents();
+        assertEquals(1, events.size());
+        Event event = events.get(0);
+        assertFalse(event.getUei().equals(EventConstants.NEW_SUSPECT_INTERFACE_EVENT_UEI));
+        m_anticipator.reset();
+
+    }
+
+
+    @Test
+    @Transactional
+    public void testSyslogMessageWithHostNameThatIsResolvableOnMinion() throws IOException {
+        // Overwrite with new config by enabling new suspect on message flag.
+        SyslogdConfigFactory config = loadSyslogConfiguration("/etc/syslogd-new-suspect-enable-configuration.xml");
+        // One of the interfaces on node1
+        final InetAddress addr = InetAddressUtils.addr("192.168.1.3");
+        // Create new consumer and module with the new config.
+        OnmsDistPoller onmsDistPoller = m_distPollerDao.whoami();
+        onmsDistPoller.setLocation("MINION");
+        m_distPollerDao.save(onmsDistPoller);
+        LocationAwareDnsLookupClient locationAwareDnsLookupClient = Mockito.mock(LocationAwareDnsLookupClient.class);
+        Mockito.when(locationAwareDnsLookupClient.lookup(anyString(), Mockito.eq("MINION"), Mockito.eq(onmsDistPoller.getId())))
+                .thenReturn(CompletableFuture.completedFuture("192.168.1.3"));
+        SyslogSinkConsumer syslogSinkConsumer = new SyslogSinkConsumer(new MetricRegistry(), null, config, m_distPollerDao, m_eventIpcManager, locationAwareDnsLookupClient);
+        SyslogSinkModule syslogSinkModule = syslogSinkConsumer.getModule();
+
+        // Syslog message with hostname (hostResolvableOnMinion) that is resolvable on Minion, should create new suspect event.
+        byte[] bytes = ("<34>1 2010-08-19T22:14:15.000Z " + "hostResolvableOnMinion" + " - - - - \uFEFFfoo0: load test 0 on tty1\0").getBytes();
+        DatagramPacket pkt = new DatagramPacket(bytes, bytes.length, addr, SyslogClient.PORT);
+        // Create a new SyslogConnection and call it to create the processed event
+        SyslogMessageLogDTO messageLog = syslogSinkModule.toMessageLog(new SyslogConnection(pkt, false));
+        // Dispatch
+        syslogSinkConsumer.handleMessage(messageLog);
+        // Capture
+        await().until(() -> m_anticipator.getUnanticipatedEvents().size(), equalTo(2));
+        List<Event> events = m_anticipator.getUnanticipatedEvents();
+        assertEquals(2, events.size());
+        // One of the events should be New Suspect.
+        assertTrue(events.stream().anyMatch(event -> event.getUei().equals(EventConstants.NEW_SUSPECT_INTERFACE_EVENT_UEI)));
+        m_anticipator.reset();
+    }
+
+
+    /**
+     * Converts given connection to a DTO and dispatches it to the consumer.
+     *
+     * We then wait until an Event is sent to the forwarder, and return the
+     * captured event.
+     */
+    private Event dispatchAndCapture(SyslogConnection connection) {
+        // Wrap
+        SyslogMessageLogDTO messageLog = m_syslogSinkModule.toMessageLog(connection);
+        // Dispatch
+        m_syslogSinkConsumer.handleMessage(messageLog);
+        // Capture
+        await().until(() -> m_anticipator.getUnanticipatedEvents().size(), equalTo(1));
+        // Capture
+        final List<Event> events = m_anticipator.getUnanticipatedEvents();
+        assertEquals(1, events.size());
+        final Event event = events.get(0);
+        m_anticipator.reset();
+        return event;
+    }
+}

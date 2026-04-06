@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.opennms.core</groupId>
+        <artifactId>org.opennms.core.snmp</artifactId>
+        <version>1.0.0</version>
+        <relativePath>..</relativePath>
+    </parent>
+
+    <groupId>org.opennms.core.snmp</groupId>
+    <artifactId>org.opennms.core.snmp.config</artifactId>
+    <name>OpenNMS :: Core :: SNMP :: Config</name>
+    <description>SnmpPeerFactory and related SNMP configuration loading classes</description>
+
+    <dependencies>
+        <!-- SnmpAgentConfigFactory interface -->
+        <dependency>
+            <groupId>org.opennms</groupId>
+            <artifactId>opennms-config-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- SnmpConfig, Definition, Range, AddressSnmpConfigVisitor model classes -->
+        <dependency>
+            <groupId>org.opennms</groupId>
+            <artifactId>opennms-config-jaxb</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- SnmpAgentConfig, SnmpConfiguration -->
+        <dependency>
+            <groupId>org.opennms.core.snmp</groupId>
+            <artifactId>org.opennms.core.snmp.api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- TextEncryptor -->
+        <dependency>
+            <groupId>org.opennms.core</groupId>
+            <artifactId>org.opennms.core.config</artifactId>
+        </dependency>
+
+        <!-- EntityScopeProvider, Interpolator, Scope -->
+        <dependency>
+            <groupId>org.opennms.core.mate</groupId>
+            <artifactId>org.opennms.core.mate.api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- InetAddressUtils, ByteArrayComparator, ConfigFileConstants, LocationUtils, IPAddressRange -->
+        <dependency>
+            <groupId>org.opennms.core</groupId>
+            <artifactId>org.opennms.core.lib</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- EventBuilder, Event (for SnmpEventInfo) -->
+        <dependency>
+            <groupId>org.opennms.core</groupId>
+            <artifactId>org.opennms.core.model-api</artifactId>
+        </dependency>
+
+        <!-- EventConstants, IEvent, IParm, IValue (for SnmpEventInfo) -->
+        <dependency>
+            <groupId>org.opennms.features.events</groupId>
+            <artifactId>org.opennms.features.events.api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- Jackson XmlMapper -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-xml</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.module</groupId>
+            <artifactId>jackson-module-jaxb-annotations</artifactId>
+        </dependency>
+
+        <!-- Guava (Strings, VisibleForTesting) -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+        </dependency>
+
+        <!-- commons-lang (SnmpEventInfo) -->
+        <dependency>
+            <groupId>commons-lang</groupId>
+            <artifactId>commons-lang</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+    </dependencies>
+</project>

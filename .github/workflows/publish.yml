@@ -1,0 +1,67 @@
+# Delta-V Horizon — Publish to GitHub Packages
+#
+# Builds all Horizon modules and publishes them as Maven artifacts
+# to GitHub Packages Maven registry.
+#
+# Trigger: Push a tag matching a semver pattern (e.g., 1.0.0, 1.0.1, 2.0.0)
+#          or run manually via workflow_dispatch.
+#
+# Consumer setup (one-time):
+#   1. Create a GitHub PAT with packages:read scope
+#   2. Add to ~/.m2/settings.xml:
+#        <server>
+#          <id>github</id>
+#          <username>YOUR_GITHUB_USERNAME</username>
+#          <password>YOUR_PAT</password>
+#        </server>
+
+name: Publish to GitHub Packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+env:
+  JAVA_VERSION: '17'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Build & Publish Maven Artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
+
+      - name: Validate tag matches POM version
+        env:
+          TAG_VERSION: ${{ github.ref_name }}
+        run: |
+          POM_VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
+          if [ "$POM_VERSION" != "$TAG_VERSION" ]; then
+            echo "ERROR: POM version ($POM_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "Version: $POM_VERSION"
+
+      - name: Build all modules
+        run: ./mvnw -B -DskipTests install
+
+      - name: Deploy to GitHub Packages
+        run: ./mvnw -B -DskipTests deploy -DaltDeploymentRepository=github::https://maven.pkg.github.com/pbrane/delta-v-horizon
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

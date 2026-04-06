@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<project
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
+    xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.opennms.features.minion</groupId>
+        <artifactId>org.opennms.features.minion.shell</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <groupId>org.opennms.features.minion.shell</groupId>
+    <artifactId>org.opennms.features.minion.shell.poller</artifactId>
+    <name>OpenNMS :: Features :: Minion :: Shell :: Poller</name>
+
+<dependencies>
+        <dependency>
+            <groupId>org.apache.karaf.shell</groupId>
+            <artifactId>org.apache.karaf.shell.core</artifactId>
+            <version>${karafVersion}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.opennms.features.poller</groupId>
+            <artifactId>org.opennms.features.poller.api</artifactId>
+        </dependency>
+    </dependencies>
+</project>

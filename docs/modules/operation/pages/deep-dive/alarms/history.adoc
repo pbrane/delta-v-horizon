@@ -1,0 +1,1 @@
+include::operation:deep-dive/elasticsearch/features/alarm-history.adoc[]

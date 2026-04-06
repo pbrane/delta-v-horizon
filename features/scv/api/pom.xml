@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+    <parent>
+        <groupId>org.opennms.features</groupId>
+        <artifactId>org.opennms.features.scv</artifactId>
+        <version>1.0.0</version>
+    </parent>
+    <dependencies>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+    </dependencies>
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>org.opennms.features.scv</groupId>
+    <artifactId>org.opennms.features.scv.api</artifactId>
+    <name>OpenNMS :: Features :: SCV :: API</name>
+
+</project>

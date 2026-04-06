@@ -1,0 +1,237 @@
+/*
+ * Licensed to The OpenNMS Group, Inc (TOG) under one or more
+ * contributor license agreements.  See the LICENSE.md file
+ * distributed with this work for additional information
+ * regarding copyright ownership.
+ *
+ * TOG licenses this file to You under the GNU Affero General
+ * Public License Version 3 (the "License") or (at your option)
+ * any later version.  You may not use this file except in
+ * compliance with the License.  You may obtain a copy of the
+ * License at:
+ *
+ *      https://www.gnu.org/licenses/agpl-3.0.txt
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied.  See the License for the specific
+ * language governing permissions and limitations under the
+ * License.
+ */
+package org.opennms.web.rest.mapper.v2;
+
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.URL;
+import java.net.UnknownHostException;
+import java.nio.charset.StandardCharsets;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.Set;
+
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.opennms.core.test.OpenNMSJUnit4ClassRunner;
+import org.opennms.core.test.xml.JsonTest;
+import org.opennms.core.test.xml.XmlTest;
+import org.opennms.core.utils.StringUtils;
+import org.opennms.netmgt.config.api.EventConfDao;
+import org.opennms.netmgt.model.OnmsAlarm;
+import org.opennms.netmgt.model.OnmsMonitoringSystem;
+import org.opennms.netmgt.model.OnmsNode;
+import org.opennms.netmgt.model.OnmsServiceType;
+import org.opennms.netmgt.model.OnmsSeverity;
+import org.opennms.netmgt.model.TroubleTicketState;
+import org.opennms.netmgt.xml.eventconf.Event;
+import org.opennms.test.JUnitConfigurationEnvironment;
+import org.opennms.web.rest.model.v2.AlarmDTO;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.ContextConfiguration;
+
+import com.google.common.io.Resources;
+
+@RunWith(OpenNMSJUnit4ClassRunner.class)
+@ContextConfiguration(locations={
+        "classpath:/META-INF/opennms/applicationContext-soa.xml",
+        "classpath:/META-INF/opennms/applicationContext-mockDao.xml",
+        "classpath:/META-INF/opennms/applicationContext-commonConfigs.xml",
+        "classpath:/META-INF/opennms/applicationContext-minimal-conf.xml",
+        "classpath:/META-INF/opennms/applicationContext-rest-mappers.xml"
+})
+@JUnitConfigurationEnvironment
+public class AlarmMapperTest {
+
+    @Autowired
+    private EventConfDao eventConfDao;
+
+    @Autowired
+    private AlarmMapper alarmMapper;
+
+    @Before
+    public void setUp() {
+        alarmMapper.setTicketUrlTemplate("https://issues.opennms.org/browse/${id}");
+    }
+
+    @Test
+    public void canMapAlarm() throws IOException {
+        eventConfDao.addEvent(getEvent());
+
+        OnmsAlarm alarm = new OnmsAlarm();
+        alarm.setId(34);
+        alarm.setUei("uei.opennms.org/nodes/interfaceDown");
+
+        OnmsNode node = getNode(1, "n1");
+        alarm.setNode(node);
+
+        alarm.setIpAddr(InetAddress.getByName("10.8.0.30"));
+        alarm.setReductionKey("uei.opennms.org/nodes/interfaceDown::1:10.8.0.30");
+        alarm.setAlarmType(1);
+        alarm.setCounter(1);
+        alarm.setSeverity(OnmsSeverity.MINOR);
+        alarm.setFirstEventTime(new Date(1503412443118L));
+        alarm.setDescription("All services are down on interface 10.8.0.30.");
+        alarm.setLogMsg("Interface 10.8.0.30 is down.");
+        alarm.setSuppressedUntil(new Date(1503412443118L));
+        alarm.setSuppressedTime(new Date(1503412443118L));
+        alarm.setLastEventTime(new Date(1503412443118L));
+        alarm.setX733ProbableCause(0);
+
+        getOnmsMonitoringSystem(alarm);
+        getOnmsServiceType(alarm);
+        alarm.setLastEventTime(new Date(1503412443118L));
+        alarm.setEventTsid(2035L);
+        alarm.setEventUei("uei.opennms.org/nodes/interfaceDown");
+
+        alarm.setTTicketId("NMS-9587");
+        alarm.setTTicketState(TroubleTicketState.OPEN);
+
+        AlarmDTO alarmDTO = alarmMapper.alarmToAlarmDTO(alarm);
+        mapAndMarshalToFromXmlAndJson(alarmDTO,
+                "alarm.34.dto.xml",
+                "alarm.34.dto.json");
+    }
+
+    @Test
+    public void canMapSituation() throws IOException {
+        eventConfDao.addEvent(getEvent());
+
+        OnmsAlarm alarm = new OnmsAlarm();
+        alarm.setId(16);
+        alarm.setUei("uei.opennms.org/nodes/interfaceDown");
+
+        OnmsNode node = getNode(1, "n1");
+        alarm.setNode(node);
+
+        alarm.setIpAddr(InetAddress.getByName("10.8.0.30"));
+        alarm.setReductionKey("uei.opennms.org/nodes/interfaceDown::1:10.8.0.30");
+        alarm.setAlarmType(1);
+        alarm.setCounter(1);
+        alarm.setSeverity(OnmsSeverity.MINOR);
+        alarm.setFirstEventTime(new Date(1503412443118L));
+        alarm.setDescription("All services are down on interface 10.8.0.30.");
+        alarm.setLogMsg("Interface 10.8.0.30 is down.");
+        alarm.setSuppressedUntil(new Date(1503412443118L));
+        alarm.setSuppressedTime(new Date(1503412443118L));
+        alarm.setLastEventTime(new Date(1503412443118L));
+        alarm.setX733ProbableCause(0);
+        alarm.setRelatedAlarms(getRelatedAlarms());
+
+        getOnmsMonitoringSystem(alarm);
+        getOnmsServiceType(alarm);
+        alarm.setLastEventTime(new Date(1503412443118L));
+        alarm.setEventTsid(2035L);
+        alarm.setEventUei("uei.opennms.org/nodes/interfaceDown");
+
+        AlarmDTO alarmDTO = alarmMapper.alarmToAlarmDTO(alarm);
+        mapAndMarshalToFromXmlAndJson(alarmDTO, "situation.16.dto.xml", "situation.16.dto.json");
+    }
+
+    public void mapAndMarshalToFromXmlAndJson(Object object, String xmlResourceUrl, String jsonResourceUrl) {
+        // Verify XML
+        try {
+            final URL xmlResource = Resources.getResource(xmlResourceUrl);
+            final String expectedXmlTemplate = Resources.toString(xmlResource, StandardCharsets.UTF_8);
+            final String expectedXml = expectedXmlTemplate.replaceAll("##DATE##", StringUtils.iso8601LocalOffsetString(new Date(1503412443118L)));
+            final String jaxbXml = XmlTest.marshalToXmlWithJaxb(object);
+            XmlTest.assertXmlEquals(expectedXml, jaxbXml);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        // Verify JSON
+        try {
+            final URL jsonResource = Resources.getResource(jsonResourceUrl);
+            final String expectedJson = Resources.toString(jsonResource, StandardCharsets.UTF_8);
+            final String jacksonJson = JsonTest.marshalToJson(object);
+            JsonTest.assertJsonEquals(expectedJson, jacksonJson);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private Event getEvent() {
+        Event eventConf = new Event();
+        eventConf.setUei("uei.opennms.org/nodes/interfaceDown");
+        eventConf.setEventLabel("OpenNMS-defined node event: interfaceDown");
+        return eventConf;
+    }
+
+    private OnmsServiceType getOnmsServiceType(OnmsAlarm alarm) {
+        OnmsServiceType serviceType = new OnmsServiceType();
+        serviceType.setName("ICMP");
+        serviceType.setId(3);
+        alarm.setServiceType(serviceType);
+        return serviceType;
+    }
+
+    private OnmsMonitoringSystem getOnmsMonitoringSystem(OnmsAlarm alarm) {
+        OnmsMonitoringSystem monitoringSystem = new OnmsMonitoringSystem();
+        monitoringSystem.setLocation("Default");
+        alarm.setDistPoller(monitoringSystem);
+        return monitoringSystem;
+    }
+
+    private OnmsNode getNode(Integer id, String label) {
+        OnmsNode node = new OnmsNode();
+        node.setId(id);
+        node.setLabel(label);
+        return node;
+    }
+
+    private Set<OnmsAlarm> getRelatedAlarms() throws UnknownHostException {
+        OnmsAlarm alarm1 = new OnmsAlarm();
+        alarm1.setId(34);
+        alarm1.setUei("uei.opennms.org/nodes/interfaceDown");
+        alarm1.setSeverity(OnmsSeverity.CRITICAL);
+        alarm1.setReductionKey("ALARM1");
+        alarm1.setDescription("ALARM1-DESC");
+        OnmsNode node1 = getNode(1, "n1");
+        alarm1.setNode(node1);
+        alarm1.setLogMsg("logit");
+        getOnmsMonitoringSystem(alarm1);
+        getOnmsServiceType(alarm1);
+        alarm1.setLastEventTime(new Date(1503412443118L));
+        alarm1.setEventTsid(2035L);
+        alarm1.setEventUei("uei.opennms.org/nodes/interfaceDown");
+        OnmsAlarm alarm2 = new OnmsAlarm();
+        alarm2.setId(32);
+        alarm2.setUei("uei.opennms.org/nodes/interfaceDown");
+        alarm2.setSeverity(OnmsSeverity.MAJOR);
+        alarm2.setReductionKey("ALARM2");
+        OnmsNode node2 = getNode(2, "n2");
+        alarm2.setNode(node2);
+        alarm2.setLogMsg("logit again");
+        getOnmsMonitoringSystem(alarm2);
+        getOnmsServiceType(alarm2);
+        alarm2.setLastEventTime(new Date(1503412443118L));
+        alarm2.setEventTsid(2035L);
+        alarm2.setEventUei("uei.opennms.org/nodes/interfaceDown");
+        Set<OnmsAlarm> alarms = new HashSet<>();
+        alarms.add(alarm1);
+        alarms.add(alarm2);
+        return alarms ;
+    }
+
+}

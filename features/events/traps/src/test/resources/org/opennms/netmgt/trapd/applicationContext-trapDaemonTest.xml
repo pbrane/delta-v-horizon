@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans" 
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:tx="http://www.springframework.org/schema/tx" 
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-4.2.xsd
+       http://www.springframework.org/schema/tx http://www.springframework.org/schema/tx/spring-tx-4.2.xsd">
+
+  <bean id="eventConfDao" class="org.opennms.netmgt.config.DefaultEventConfDao">
+  </bean>
+
+  <bean id="eventConfTestResource" class="org.springframework.core.io.ClassPathResource">
+    <constructor-arg value="org/opennms/netmgt/trapd/eventconf.xml"/>
+  </bean>
+
+  <bean id="eventConfEventList" class="org.opennms.netmgt.config.EventConfTestUtil" factory-method="parseResourcesAsEventConfEvents">
+    <constructor-arg ref="eventConfTestResource"/>
+  </bean>
+
+  <bean class="org.springframework.beans.factory.config.MethodInvokingFactoryBean" depends-on="eventConfDao">
+    <property name="targetObject" ref="eventConfDao"/>
+    <property name="targetMethod" value="loadEventsFromDB"/>
+    <property name="arguments">
+      <list>
+        <ref bean="eventConfEventList"/>
+      </list>
+    </property>
+  </bean>
+
+  <!-- We need a mock consumer manager and a dispatcher factory in order to make the tests work-->
+  <import resource="classpath:/META-INF/opennms/mockSinkConsumerManager.xml" />
+  <bean id="mockMessageDispatcherFactory" class="org.opennms.core.ipc.sink.mock.MockMessageDispatcherFactory">
+    <property name="consumer" ref="trapSinkConsumer"/>
+  </bean>
+
+  <!-- update config for tests -->
+  <bean id="trapdConfigUpdate" class="org.opennms.netmgt.trapd.TrapdConfigConfigUpdater"/>
+
+  <bean name="twinPublisher" class="org.opennms.core.ipc.twin.memory.MemoryTwinPublisher">
+  </bean>
+  <alias name="twinPublisher" alias="memoryTwinPublisher"/>
+
+  <!-- Mock SecureCredentialsVault for Trapd constructor injection -->
+  <bean id="jceksSecureCredentialsVault" class="org.opennms.netmgt.trapd.TrapdIT$MockSecureCredentialsVault"/>
+
+  <bean name="memoryTwinSubscriber" class="org.opennms.core.ipc.twin.memory.MemoryTwinSubscriber">
+    <constructor-arg index="0" ref="twinPublisher"/>
+    <constructor-arg index="1" value="Default"/>
+  </bean>
+</beans>

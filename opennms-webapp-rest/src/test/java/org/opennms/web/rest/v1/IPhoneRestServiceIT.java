@@ -1,0 +1,215 @@
+/*
+ * Licensed to The OpenNMS Group, Inc (TOG) under one or more
+ * contributor license agreements.  See the LICENSE.md file
+ * distributed with this work for additional information
+ * regarding copyright ownership.
+ *
+ * TOG licenses this file to You under the GNU Affero General
+ * Public License Version 3 (the "License") or (at your option)
+ * any later version.  You may not use this file except in
+ * compliance with the License.  You may obtain a copy of the
+ * License at:
+ *
+ *      https://www.gnu.org/licenses/agpl-3.0.txt
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied.  See the License for the specific
+ * language governing permissions and limitations under the
+ * License.
+ */
+package org.opennms.web.rest.v1;
+
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import javax.ws.rs.core.MediaType;
+
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.opennms.core.test.OpenNMSJUnit4ClassRunner;
+import org.opennms.core.test.db.annotations.JUnitTemporaryDatabase;
+import org.opennms.core.test.rest.AbstractSpringJerseyRestTestCase;
+import org.opennms.netmgt.dao.DatabasePopulator;
+import org.opennms.netmgt.dao.api.DistPollerDao;
+import org.opennms.netmgt.dao.api.MonitoringLocationDao;
+import org.opennms.netmgt.model.OnmsNode;
+import org.opennms.test.JUnitConfigurationEnvironment;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.web.WebAppConfiguration;
+import org.springframework.transaction.annotation.Transactional;
+
+@RunWith(OpenNMSJUnit4ClassRunner.class)
+@WebAppConfiguration
+@ContextConfiguration(locations={
+        "classpath:/META-INF/opennms/applicationContext-soa.xml",
+        "classpath:/META-INF/opennms/applicationContext-commonConfigs.xml",
+        "classpath:/META-INF/opennms/applicationContext-minimal-conf.xml",
+        "classpath:/META-INF/opennms/applicationContext-dao.xml",
+        "classpath:/META-INF/opennms/applicationContext-mockConfigManager.xml",
+        "classpath*:/META-INF/opennms/component-service.xml",
+        "classpath*:/META-INF/opennms/component-dao.xml",
+        "classpath:/META-INF/opennms/applicationContext-databasePopulator.xml",
+        "classpath:/META-INF/opennms/mockEventIpcManager.xml",
+        "file:src/main/webapp/WEB-INF/applicationContext-svclayer.xml",
+        "file:src/main/webapp/WEB-INF/applicationContext-cxf-common.xml",
+        "classpath:/applicationContext-rest-test.xml"
+})
+@JUnitConfigurationEnvironment(systemProperties = "org.opennms.timeseries.strategy=integration")
+@JUnitTemporaryDatabase
+@Transactional
+public class IPhoneRestServiceIT extends AbstractSpringJerseyRestTestCase {
+
+    @Autowired
+    private DistPollerDao m_distPollerDao;
+
+    @Autowired
+    private MonitoringLocationDao m_locationDao;
+
+    @Autowired
+    private DatabasePopulator m_databasePopulator;
+
+    @Override
+    protected void afterServletStart() throws Exception {
+        m_databasePopulator.populateDatabase();
+    }
+
+    @Test
+    @JUnitTemporaryDatabase
+    public void testAcknowlegement() throws Exception {
+        final Pattern p = Pattern.compile("^.*<ackTime>(.*?)</ackTime>.*$", Pattern.DOTALL & Pattern.MULTILINE);
+        sendData(POST, MediaType.APPLICATION_FORM_URLENCODED, "/acks", "alarmId=1&action=ack", 200);
+        String xml = sendRequest(GET, "/alarms/1", new HashMap<String, String>(), 200);
+        Matcher m = p.matcher(xml);
+        assertTrue(m.matches());
+        assertTrue(m.group(1).length() > 0);
+        sendData(POST, MediaType.APPLICATION_FORM_URLENCODED, "/acks", "alarmId=1&action=unack", 200);
+        xml = sendRequest(GET, "/alarms/1", new HashMap<String, String>(), 200);
+        m = p.matcher(xml);
+        assertFalse(m.matches());
+    }
+
+    @Test
+    @JUnitTemporaryDatabase
+    public void testAlarms() throws Exception {
+        Map<String, String> parameters = new HashMap<String, String>();
+        parameters.put("orderBy", "lastEventTime");
+        parameters.put("order", "desc");
+        parameters.put("alarmAckUser", "null");
+        parameters.put("limit", "1");
+        String xml = sendRequest(GET, "/alarms", parameters, 200);
+        assertTrue(xml.contains("This is a test alarm"));
+
+        parameters.clear();
+        parameters.put("orderBy", "lastEventTime");
+        parameters.put("order", "asc");
+        parameters.put("alarmAckUser", "null");
+        parameters.put("limit", "1");
+        xml = sendRequest(GET, "/alarms", parameters, 200);
+        assertTrue(xml.contains("This is a test alarm"));
+
+        parameters.clear();
+        parameters.put("orderBy", "lastEventTime");
+        parameters.put("order", "asc");
+        parameters.put("alarmAckUser", "notnull");
+        parameters.put("limit", "1");
+        xml = sendRequest(GET, "/alarms", parameters, 200);
+        // There are no acknowledged alarms
+        assertTrue(xml.contains("<alarms offset=\"0\" totalCount=\"0\"/>"));
+
+        xml = sendRequest(GET, "/alarms/1", parameters, 200);
+        assertTrue(xml.contains("This is a test alarm"));
+        assertTrue(xml.contains("<nodeLabel>node1</nodeLabel>"));
+    }
+
+    @Test
+    @JUnitTemporaryDatabase
+    public void testEvents() throws Exception {
+        Map<String, String> parameters = new HashMap<String, String>();
+        String xml = sendRequest(GET, "/events", parameters, 200);
+        assertTrue(xml.contains("uei.opennms.org/test"));
+
+        parameters.put("orderBy", "lastEventTime");
+        parameters.put("order", "desc");
+        parameters.put("limit", "1");
+        xml = sendRequest(GET, "/events/1", parameters, 200);
+        assertTrue(xml.contains("uei.opennms.org/test"));
+    }
+
+    @Test
+    @JUnitTemporaryDatabase
+    public void testNodes() throws Exception {
+        final Map<String, Object> parameters = new HashMap<String, Object>();
+        parameters.put("comparator", "ilike");
+        parameters.put("match", "any");
+        parameters.put("label", "1%");
+        parameters.put("ipInterface.ipAddress", "1%");
+        parameters.put("ipInterface.ipHostName", "1%");
+        String xml = sendRequest(GET, "/nodes", parameters, 200);
+        assertTrue(xml.contains("<node "));
+        assertTrue(xml.contains("label=\"node1\""));
+
+        parameters.clear();
+        parameters.put("comparator", "ilike");
+        parameters.put("match", "any");
+        parameters.put("label", "8%");
+        parameters.put("ipInterface.ipAddress", "8%");
+        parameters.put("ipInterface.ipHostName", "8%");
+        xml = sendRequest(GET, "/nodes", parameters, 200);
+        assertTrue(xml.contains("totalCount=\"0\""));
+
+        parameters.clear();
+        parameters.put("limit", "50");
+        parameters.put("orderBy", "ifLostService");
+        parameters.put("order", "desc");
+        xml = sendRequest(GET, "/outages/forNode/1", parameters, 200);
+        assertTrue(xml.contains("SNMP"));
+
+        parameters.clear();
+        parameters.put("orderBy", new String[] { "ipHostName", "ipAddress" });
+        xml = sendRequest(GET, "/nodes/1/ipinterfaces", parameters, 200);
+        assertTrue(xml.contains("192.168.1.1"));
+
+        parameters.clear();
+        parameters.put("orderBy", new String[] { "ifName", "ipAddress", "ifDesc" });
+        xml = sendRequest(GET, "/nodes/1/snmpinterfaces", parameters, 200);
+        assertTrue(xml.contains("Initial ifAlias value"));
+
+        parameters.clear();
+        parameters.put("limit", "50");
+        parameters.put("node.id", "1");
+        xml = sendRequest(GET, "/events", parameters, 200);
+        assertTrue(xml, xml.contains("totalCount=\"1\""));
+    }
+
+    @Test
+    @JUnitTemporaryDatabase
+    public void testSnmpInterfacesForNodeId() throws Exception {
+        Map<String, Object> parameters = new HashMap<String, Object>();
+        parameters.put("orderBy", new String[] { "ifName", "ipAddress", "ifDesc" });
+        String xml = sendRequest(GET, "/nodes/1/snmpinterfaces", parameters, 200);
+        assertTrue(xml.contains("Initial ifAlias value"));
+    }
+
+    @Test
+    @JUnitTemporaryDatabase
+    public void testOutages() throws Exception {
+        Map<String, Object> parameters = new HashMap<String, Object>();
+        parameters.put("orderBy", "ifLostService");
+        parameters.put("order", "desc");
+        parameters.put("ifRegainedService", "null");
+        String xml = sendRequest(GET, "/outages", parameters, 200);
+        assertTrue(xml.contains("count=\"1\""));
+        assertTrue(xml.contains("id=\"2\""));
+        assertTrue(xml.contains("192.168.1.1"));
+        assertFalse(xml.contains("<ipAddress/>"));
+    }
+}

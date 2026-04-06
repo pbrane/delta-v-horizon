@@ -1,0 +1,572 @@
+/*
+ * Licensed to The OpenNMS Group, Inc (TOG) under one or more
+ * contributor license agreements.  See the LICENSE.md file
+ * distributed with this work for additional information
+ * regarding copyright ownership.
+ *
+ * TOG licenses this file to You under the GNU Affero General
+ * Public License Version 3 (the "License") or (at your option)
+ * any later version.  You may not use this file except in
+ * compliance with the License.  You may obtain a copy of the
+ * License at:
+ *
+ *      https://www.gnu.org/licenses/agpl-3.0.txt
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied.  See the License for the specific
+ * language governing permissions and limitations under the
+ * License.
+ */
+package org.opennms.netmgt.config;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import org.apache.commons.lang.StringUtils;
+import org.opennms.core.config.api.ConfigReloadContainer;
+import org.opennms.core.spring.FileReloadContainer;
+import org.opennms.core.utils.ConfigFileConstants;
+import org.opennms.core.xml.AbstractJaxbConfigDao;
+import org.opennms.netmgt.collection.api.AttributeGroupType;
+import org.opennms.netmgt.config.api.DataCollectionConfigDao;
+import org.opennms.netmgt.config.datacollection.DataCollectionGroups;
+import org.opennms.netmgt.config.datacollection.DatacollectionConfig;
+import org.opennms.netmgt.config.datacollection.DatacollectionGroup;
+import org.opennms.netmgt.config.datacollection.Group;
+import org.opennms.netmgt.config.datacollection.Groups;
+import org.opennms.netmgt.config.datacollection.IncludeCollection;
+import org.opennms.netmgt.config.datacollection.MibObj;
+import org.opennms.netmgt.config.datacollection.MibObjProperty;
+import org.opennms.netmgt.config.datacollection.MibObject;
+import org.opennms.netmgt.config.datacollection.ResourceType;
+import org.opennms.netmgt.config.datacollection.SnmpCollection;
+import org.opennms.netmgt.config.datacollection.SystemDef;
+import org.opennms.netmgt.config.datacollection.SystemDefChoice;
+import org.opennms.netmgt.config.datacollection.Systems;
+import org.opennms.netmgt.rrd.RrdRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * DefaultDataCollectionConfigDao
+ *
+ * <p>This class is the main repository for SNMP data collection configuration
+ * information used by the SNMP service monitor. When this class is loaded it
+ * reads the SNMP data collection configuration into memory.</p>
+ *
+ * @author <a href="mail:agalue@opennms.org">Alejandro Galue</a>
+ */
+public class DefaultDataCollectionConfigDao extends AbstractJaxbConfigDao<DatacollectionConfig, DatacollectionConfig> implements DataCollectionConfigDao {
+
+    public static final Logger LOG = LoggerFactory.getLogger(DefaultDataCollectionConfigDao.class);
+
+    private String m_configDirectory;
+
+    private List<String> dataCollectionGroups = new ArrayList<>();
+    private Map<String, ResourceType> resourceTypes = new HashMap<String, ResourceType>();
+    private ConfigReloadContainer<DataCollectionGroups> m_extContainer;
+
+    public DefaultDataCollectionConfigDao() {
+        super(DatacollectionConfig.class, "data-collection");
+        initExtensions();
+    }
+
+    @Override
+    protected DatacollectionConfig translateConfig(final DatacollectionConfig config) {
+        final DataCollectionConfigParser parser = new DataCollectionConfigParser(getConfigDirectory());
+        resourceTypes.clear();
+
+        Map<String,DatacollectionGroup> externalGroupMap = parser.loadExternalGroupMap();
+        // Create a special collection to hold all resource types, because they should be defined only once.
+        final SnmpCollection resourceTypeCollection = new SnmpCollection();
+        resourceTypeCollection.setName("__resource_type_collection");
+
+        // Load data collection groups from container.
+        DataCollectionGroups dataCollectionGroupObj = m_extContainer.getObject();
+        if (dataCollectionGroupObj != null) {
+            // Add data collection groups loaded from container to external group map.
+            dataCollectionGroupObj.getSnmpCollectionNames().forEach(collectionName -> {
+                List<DatacollectionGroup> datacollectionGroupList = dataCollectionGroupObj.getDataCollectionGroup(collectionName);
+                datacollectionGroupList.stream().forEach(group -> externalGroupMap.put(group.getName(), group));
+            });
+        }
+
+        // Updating Configured Collections
+        for (final SnmpCollection collection : config.getSnmpCollections()) {
+            if(dataCollectionGroupObj != null) {
+                // Set include-collection for the specific collection so that parseCollection will load all resources.
+                Set<String> collectionNames = dataCollectionGroupObj.getSnmpCollectionNames();
+                if (collectionNames.contains(collection.getName())) {
+                    List<DatacollectionGroup> datacollectionGroupList = dataCollectionGroupObj.getDataCollectionGroup(collection.getName());
+                    datacollectionGroupList.stream().forEach(datacollectionGroup -> {
+                        IncludeCollection includeCollection = new IncludeCollection();
+                        includeCollection.setDataCollectionGroup(datacollectionGroup.getName());
+                        collection.addIncludeCollection(includeCollection);
+                    });
+                }
+            }
+            parser.parseCollection(collection);
+            // Save local resource types
+            for (final ResourceType rt : collection.getResourceTypes()) {
+                resourceTypeCollection.addResourceType(rt);
+                resourceTypes.put(rt.getName(), rt);
+            }
+
+            // Remove local resource types
+            collection.setResourceTypes(new ArrayList<ResourceType>());
+            // Save external Resource Types
+            for (IncludeCollection include : collection.getIncludeCollections()) {
+                if (include.getDataCollectionGroup() != null) {
+                    DatacollectionGroup group = externalGroupMap.get(include.getDataCollectionGroup());
+                    for (final ResourceType rt : group.getResourceTypes()) {
+                        resourceTypeCollection.addResourceType(rt);
+                        resourceTypes.put(rt.getName(), rt);
+                    }
+                }
+            }
+        }
+
+        resourceTypeCollection.setGroups(new Groups());
+        resourceTypeCollection.setSystems(new Systems());
+        config.insertSnmpCollection(resourceTypeCollection);
+        dataCollectionGroups.clear();
+        dataCollectionGroups.addAll(externalGroupMap.keySet());
+
+        validateResourceTypes(config.getSnmpCollections(), resourceTypes.keySet());
+
+        return config;
+    }
+
+    public void setConfigDirectory(String configDirectory) {
+        this.m_configDirectory = configDirectory;
+    }
+
+    public String getConfigDirectory() {
+        if (m_configDirectory == null) {
+            final StringBuilder sb = new StringBuilder(ConfigFileConstants.getHome());
+            sb.append(File.separator);
+            sb.append("etc");
+            sb.append(File.separator);
+            sb.append("datacollection");
+            sb.append(File.separator);
+            m_configDirectory = sb.toString();
+        }
+        return m_configDirectory;
+    }
+
+    @Override
+    public String getSnmpStorageFlag(final String collectionName) {
+        final SnmpCollection collection = getSnmpCollection(getContainer(), collectionName);
+        return collection == null ? null : collection.getSnmpStorageFlag();
+    }
+
+    @Override
+    public List<MibObject> getMibObjectList(final String cName, final String aSysoid, final String anAddress, final int ifType) {
+        LOG.debug("getMibObjectList: collection: {} sysoid: {} address: {} ifType: {}", cName, aSysoid, anAddress, ifType);
+
+        if (aSysoid == null) {
+            LOG.debug("getMibObjectList: aSysoid parameter is NULL...");
+            return new ArrayList<>();
+        }
+
+        final SnmpCollection collection = getSnmpCollection(getContainer(), cName);
+        if (collection == null) {
+            return Collections.emptyList();
+        }
+
+        final Systems systems = collection.getSystems();
+        if (systems == null) {
+            return Collections.emptyList();
+        }
+
+        final List<SystemDef> systemList = new ArrayList<>();
+
+        for (final SystemDef system : systems.getSystemDefs()) {
+            if (systemDefMatches(system, aSysoid, anAddress)) {
+                LOG.debug("getMibObjectList: MATCH!! adding system '{}'", system.getName());
+                systemList.add(system);
+            }
+        }
+
+        final List<MibObject> mibObjectList = new ArrayList<>();
+
+        for (final SystemDef system : systemList) {
+            for (final String grpName : system.getCollect().getIncludeGroups()) {
+                processGroupName(cName, grpName, ifType, mibObjectList);
+            }
+        }
+
+        return mibObjectList;
+    }
+
+    @Override
+    public List<MibObjProperty> getMibObjProperties(final String cName, final String aSysoid, final String anAddress) {
+        LOG.debug("getMibObjProperties: collection: {} sysoid: {} address: {}", cName, aSysoid, anAddress);
+
+        if (aSysoid == null) {
+            LOG.debug("getMibObjProperties: aSysoid parameter is NULL...");
+            return new ArrayList<>();
+        }
+
+        final SnmpCollection collection = getSnmpCollection(getContainer(), cName);
+        if (collection == null) {
+            return Collections.emptyList();
+        }
+
+        final Systems systems = collection.getSystems();
+        if (systems == null) {
+            return Collections.emptyList();
+        }
+
+        final List<SystemDef> systemList = new ArrayList<>();
+        for (final SystemDef system : systems.getSystemDefs()) {
+            if (systemDefMatches(system, aSysoid, anAddress)) {
+                systemList.add(system);
+            }
+        }
+
+        final List<MibObjProperty> mibProperties = new ArrayList<>();
+        for (final SystemDef system : systemList) {
+            for (final String grpName : system.getCollect().getIncludeGroups()) {
+                processGroupForProperties(cName, grpName, mibProperties);
+            }
+        }
+
+        return mibProperties;
+    }
+
+    @Override
+    public Map<String, ResourceType> getConfiguredResourceTypes() {
+        return Collections.unmodifiableMap(resourceTypes);
+    }
+
+    @Override
+    public RrdRepository getRrdRepository(final String collectionName) {
+        final RrdRepository repo = new RrdRepository();
+        repo.setRrdBaseDir(new File(getRrdPath()));
+        repo.setRraList(getRRAList(collectionName));
+        repo.setStep(getStep(collectionName));
+        repo.setHeartBeat((2 * getStep(collectionName)));
+        return repo;
+    }
+
+    @Override
+    public int getStep(final String collectionName) {
+        final SnmpCollection collection = getSnmpCollection(getContainer(), collectionName);
+        return collection == null ? -1 : collection.getRrd().getStep();
+    }
+
+    @Override
+    public List<String> getRRAList(final String collectionName) {
+        final SnmpCollection collection = getSnmpCollection(getContainer(), collectionName);
+        return collection == null ? null : collection.getRrd().getRras();
+    }
+
+    @Override
+    public String getRrdPath() {
+        final String rrdPath = getContainer().getObject().getRrdRepository();
+        if (rrdPath == null) {
+            throw new RuntimeException("Configuration error, failed to retrieve path to RRD repository.");
+        }
+
+        if (rrdPath.endsWith(File.separator)) {
+            return rrdPath.substring(0, (rrdPath.length() - File.separator.length()));
+        }
+        return rrdPath;
+    }
+
+    /* Private Methods */
+
+    private static SnmpCollection getSnmpCollection(final FileReloadContainer<DatacollectionConfig> container, final String collectionName) {
+        for (final SnmpCollection collection : container.getObject().getSnmpCollections()) {
+            if (collection.getName().equals(collectionName)) return collection;
+        }
+        return null;
+    }
+
+    private void processGroupName(final String cName, final String groupName, final int ifType, final List<MibObject> mibObjectList) {
+        final Map<String, Group> groupMap = getCollectionGroupMap(getContainer()).get(cName);
+
+        final Group group = groupMap.get(groupName);
+
+        if (group == null) {
+            LOG.warn("DataCollectionConfigFactory.processGroupName: unable to retrieve group information for group name '{}': check DataCollection.xml file.", groupName);
+            return;
+        }
+
+        LOG.debug("processGroupName:  processing group: {} groupIfType: {} ifType: {}", groupName, group.getIfType(), ifType);
+
+        for (final String includeGroup : group.getIncludeGroups()) {
+            processGroupName(cName, includeGroup, ifType, mibObjectList);
+        }
+
+        final String ifTypeStr = String.valueOf(ifType);
+        String groupIfType = group.getIfType();
+
+        boolean addGroupObjects = false;
+        if (ifType == NODE_ATTRIBUTES) {
+            if (groupIfType.equals(AttributeGroupType.IF_TYPE_IGNORE)) {
+                addGroupObjects = true;
+            }
+        } else {
+            if (groupIfType.equals(AttributeGroupType.IF_TYPE_ALL)) {
+                addGroupObjects = true;
+            } else if ("ignore".equals(groupIfType)) {
+                // Do nothing
+            } else if (ifType == ALL_IF_ATTRIBUTES) {
+                addGroupObjects = true;
+            } else {
+                boolean isList = false;
+                if (groupIfType.indexOf(',') != -1) isList = true;
+
+                if (!isList) {
+                    if (ifTypeStr.equals(groupIfType)) addGroupObjects = true;
+                } else {
+                    int tmpIndex = groupIfType.indexOf(ifTypeStr);
+                    while (tmpIndex != -1) {
+                        groupIfType = groupIfType.substring(tmpIndex);
+
+                        final int nextComma = groupIfType.indexOf(',');
+
+                        String parsedType = null;
+                        if (nextComma == -1) {
+                            parsedType = groupIfType;
+                        } else {
+                            parsedType = groupIfType.substring(0, nextComma);
+                        }
+                        if (ifTypeStr.equals(parsedType)) {
+                            addGroupObjects = true;
+                            break;
+                        }
+
+                        if (nextComma == -1) break;
+
+                        groupIfType = groupIfType.substring(nextComma + 1);
+                        tmpIndex = groupIfType.indexOf(ifTypeStr);
+                    }
+                }
+            }
+        }
+
+        if (addGroupObjects) {
+            LOG.debug("processGroupName: OIDs from group '{}:{}' are included for ifType: {}", group.getName(), group.getIfType(), ifType);
+            processObjectList(groupName, groupIfType, group.getMibObjs(), mibObjectList);
+        } else {
+            LOG.debug("processGroupName: OIDs from group '{}:{}' are excluded for ifType: {}", group.getName(), group.getIfType(), ifType);
+        }
+    }
+
+    private void processGroupForProperties(final String cName, final String groupName, final List<MibObjProperty> mibObjProperties) {
+        final Map<String, Group> groupMap = getCollectionGroupMap(getContainer()).get(cName);
+        final Group group = groupMap.get(groupName);
+        if (group == null) {
+            LOG.warn("processGroupForProperties: unable to retrieve group information for group name '{}': check DataCollection.xml file.", groupName);
+            return;
+        }
+        for (final String includeGroup : group.getIncludeGroups()) {
+            processGroupForProperties(cName, includeGroup, mibObjProperties);
+        }
+        group.getProperties().forEach(p -> p.setGroupName(groupName));
+        mibObjProperties.addAll(group.getProperties());
+    }
+
+    private void processObjectList(final String groupName, final String groupIfType, final List<MibObj> objectList, final List<MibObject> mibObjectList) {
+        for (final MibObj mibObj : objectList) {
+            final MibObject aMibObject = new MibObject();
+            aMibObject.setGroupName(groupName);
+            aMibObject.setGroupIfType(groupIfType);
+            aMibObject.setOid(mibObj.getOid());
+            aMibObject.setAlias(mibObj.getAlias());
+            aMibObject.setType(mibObj.getType());
+            aMibObject.setInstance(mibObj.getInstance());
+            aMibObject.setMaxval(mibObj.getMaxval());
+            aMibObject.setMinval(mibObj.getMinval());
+
+            final ResourceType resourceType = getConfiguredResourceTypes().get(mibObj.getInstance());
+            if (resourceType != null) {
+                aMibObject.setResourceType(resourceType);
+            }
+
+            if (!mibObjectList.contains(aMibObject)) {
+                mibObjectList.add(aMibObject);
+            }
+        }
+    }
+
+    private static Map<String,Map<String,Group>> getCollectionGroupMap(FileReloadContainer<DatacollectionConfig> container) {
+        final Map<String,Map<String,Group>> collectionGroupMap = new HashMap<String,Map<String,Group>>();
+
+        for (final SnmpCollection collection : container.getObject().getSnmpCollections()) {
+            final Map<String,Group> groupMap = new HashMap<String,Group>();
+
+            final Groups groups = collection.getGroups();
+            if (groups != null) {
+                for (final Group group : groups.getGroups()) {
+                    groupMap.put(group.getName(), group);
+                }
+            }
+            collectionGroupMap.put(collection.getName(), groupMap);
+        }
+        return Collections.unmodifiableMap(collectionGroupMap);
+    }
+
+    private void validateResourceTypes(final Collection<SnmpCollection> snmpCollections, final Set<String> allowedResourceTypes) {
+        final String configuredString;
+        if (allowedResourceTypes.size() == 0) {
+            configuredString = "(none)";
+        } else {
+            configuredString = StringUtils.join(allowedResourceTypes, ", ");
+        }
+
+        final String allowableValues = "any positive number, 'ifIndex', or any of the configured resourceTypes: " + configuredString;
+        for (final SnmpCollection collection : snmpCollections) {
+            final Groups groups = collection.getGroups();
+            if (groups != null) {
+                for (final Group group : groups.getGroups()) {
+                    for (final MibObj mibObj : group.getMibObjs()) {
+                        final String instance = mibObj.getInstance();
+                        if (instance == null)                            continue;
+                        if (MibObject.INSTANCE_IFINDEX.equals(instance)) continue;
+                        if (allowedResourceTypes.contains(instance))     continue;
+                        try {
+                            if (Integer.parseInt(instance.trim()) >= 0) {
+                                continue;
+                            }
+                        } catch (NumberFormatException e) {}
+
+                        throw new IllegalArgumentException("instance '" + instance + "' invalid in mibObj definition for OID '" + mibObj.getOid() + "' in collection '" + collection.getName() + "' for group '" + group.getName() + "'.  Allowable instance values: " + allowableValues);
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean systemDefMatches(SystemDef system, String aSysoid, String anAddress) {
+        boolean bMatchSysoid = false;
+
+        boolean isMask = false;
+        String currSysoid = null;
+        SystemDefChoice sysChoice = system.getSystemDefChoice();
+
+        if (sysChoice.getSysoid() != null) {
+            currSysoid = sysChoice.getSysoid();
+        } else if (sysChoice.getSysoidMask() != null) {
+            currSysoid = sysChoice.getSysoidMask();
+            isMask = true;
+        }
+
+        if (currSysoid != null) {
+            if (isMask) {
+                if (aSysoid.startsWith(currSysoid)) {
+                    LOG.debug("getMibObjectList: includes sysoid {} for system <name>: {}", aSysoid, system.getName());
+                    bMatchSysoid = true;
+                }
+            } else {
+                if (aSysoid.equals(currSysoid)) {
+                    LOG.debug("getMibObjectList: includes sysoid {} for system <name>: {}", aSysoid, system.getName());
+                    bMatchSysoid = true;
+                }
+            }
+        }
+
+        boolean bMatchIPAddress = true;
+        if (bMatchSysoid == true) {
+            if (anAddress != null) {
+                List<String> addrList = null;
+                List<String> maskList = null;
+                if (system.getIpList() != null) {
+                    addrList = system.getIpList().getIpAddresses();
+                    maskList = system.getIpList().getIpAddressMasks();
+                }
+
+                if (addrList != null && addrList.size() > 0 || maskList != null && maskList.size() > 0) {
+                    bMatchIPAddress = false;
+                }
+
+                if (addrList != null && addrList.size() > 0) {
+                    if (addrList.contains(anAddress)) {
+                        LOG.debug("getMibObjectList: addrList exists and does include IP address {} for system <name>: {}", anAddress, system.getName());
+                        bMatchIPAddress = true;
+                    }
+                }
+
+                if (bMatchIPAddress == false) {
+                    if (maskList != null && maskList.size() > 0) {
+                        for (final String currMask : maskList) {
+                            if (anAddress.indexOf(currMask) == 0) {
+                                LOG.debug("getMibObjectList: anAddress '{}' matches mask '{}'", anAddress, currMask);
+                                bMatchIPAddress = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return bMatchSysoid && bMatchIPAddress;
+    }
+
+    @Override
+    public DatacollectionConfig getRootDataCollection() {
+        return getContainer().getObject();
+    }
+
+    @Override
+    public List<String> getAvailableDataCollectionGroups() {
+        return dataCollectionGroups;
+    }
+
+    @Override
+    public List<String> getAvailableSystemDefs() {
+        List<String> systemDefs = new ArrayList<>();
+        for (final SnmpCollection collection : getContainer().getObject().getSnmpCollections()) {
+            if (collection.getSystems() != null) {
+                for (final SystemDef systemDef : collection.getSystems().getSystemDefs()) {
+                    systemDefs.add(systemDef.getName());
+                }
+            }
+        }
+        return systemDefs;
+    }
+
+    @Override
+    public List<String> getAvailableMibGroups() {
+        List<String> groups = new ArrayList<>();
+        for (final SnmpCollection collection : getContainer().getObject().getSnmpCollections()) {
+            if (collection.getGroups() != null) {
+                for (final Group group : collection.getGroups().getGroups()) {
+                    groups.add(group.getName());
+                }
+            }
+        }
+        return groups;
+    }
+
+    @Override
+    public void reload() {
+        getContainer().reload();
+    }
+
+    @Override
+    public Date getLastUpdate() {
+        getContainer().getObject();
+        return new Date(getContainer().getLastUpdate());
+    }
+
+    private void initExtensions() {
+        m_extContainer = new ConfigReloadContainer.Builder<>(DataCollectionGroups.class)
+                .withFolder((accumulator, next) -> accumulator.getDataCollectionGroupByName()
+                        .putAll(next.getDataCollectionGroupByName()))
+                .build();
+    }
+}

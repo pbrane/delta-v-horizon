@@ -1,0 +1,30 @@
+= InMemory Ticketer
+
+To test out external ticketing plugin integration, Inmemory ticketer plugin is added as a OSGi feature.
+This can be installed by adding feature `opennms-inmemory-ticketer`.
+
+Once installed, use `opennms:inmemory-ticketer` karaf command to query/update ticket state.
+
+Ticketing is automatically enabled when the feature is installed. No additional property configuration is required.
+
+== Example
+
+Query a ticket from InMemory ticketer:
+
+.Connect to the Karaf Shell
+[source, console]
+----
+ssh -p 8101 admin@localhost
+----
+
+[source, karaf]
+----
+opennms:inmemory-ticketer -t 4
+----
+
+Set ticket status to CLOSED on ticketId 4 :
+
+[source, karaf]
+----
+opennms:inmemory-ticketer -t 4 CLOSED
+----

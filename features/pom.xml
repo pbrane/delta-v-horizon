@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <parent>
+    <groupId>org.opennms</groupId>
+    <artifactId>opennms</artifactId>
+    <version>1.0.0</version>
+  </parent>
+  <modelVersion>4.0.0</modelVersion>
+  <artifactId>org.opennms.features</artifactId>
+  <packaging>pom</packaging>
+  <name>OpenNMS :: Features</name>
+  <modules>
+
+    <!-- Enlinkd -->
+    <module>enlinkd</module>
+
+    <!-- Graphs -->
+    <module>graph</module>
+
+    <!-- Topologies -->
+    <module>topologies</module>
+
+    <!-- ActiveMQ broker -->
+    <module>activemq</module>
+
+    <module>api-layer</module>
+
+    <!-- Alarms -->
+    <module>alarms</module>
+
+    <!-- AMQP Event Gateway and Alarm Northbounder -->
+    <module>amqp</module>
+
+
+    <!-- OpenNMS Provisioning API and implementations -->
+    <module>provisioning</module>
+
+    <!-- OpenNMS Polling API -->
+    <module>poller</module>
+
+    <!-- Events -->
+    <module>events</module>
+
+    <!-- Event Translator -->
+    <module>event-translator</module>
+
+    <!-- Flows -->
+    <module>flows</module>
+
+    <!-- Graphml -->
+    <module>graphml</module>
+
+    <module>kafka</module>
+
+    <!-- Executor factories -->
+    <module>executor-factory</module>
+
+    <!-- OpenNMS Collection API and implementations -->
+    <module>collection</module>
+    <module>jdbc-collector</module>
+    <module>juniper-tca-collector</module>
+    <module>prometheus-collector</module>
+    <module>telemetry</module>
+    <module>wsman</module>
+
+    <!-- Discovery -->
+    <module>discovery</module>
+
+    <module>request-tracker</module>
+
+    <!-- OpenNMS REST -->
+    <module>rest</module>
+
+    <!-- OpenNMS rest provider module -->
+    <module>rest-provider</module>
+
+    <!-- JMX config generator -->
+    <module>jmx-config-generator</module>
+
+    <!-- SNMP MIB Parser and Event/Collection Configuration -->
+    <module>mib-compiler</module>
+
+    <!-- Near Real Time Graphing -->
+    <module>nrtg</module>
+
+    <!-- webapps -->
+    <module>root-webapp</module>
+
+    <!-- Measurements API -->
+    <module>measurements</module>
+
+    <!-- Newts -->
+    <module>newts</module>
+    <module>newts-repository-converter</module>
+
+    <!-- timeseries -->
+    <module>timeseries</module>
+    <module>timeseries-shell</module>
+
+    <!-- OpenNMS Vaadin Themes -->
+    <module>themes</module>
+
+    <!-- Data Choices -->
+    <module>datachoices</module>
+
+    <!-- Other projects -->
+    <module>distributed</module>
+    <module>endpoints</module>
+    <module>geocoder</module>
+    <module>geolocation</module>
+    <module>instrumentationLogReader</module>
+    <module>name-cutter</module>
+    <module>search</module>
+    <module>springframework-security</module>
+    <module>status</module>
+    <module>system-report</module>
+    <module>timeformat</module>
+    <module>timeseries-evaluate</module>
+
+    <!-- Business Service Monitor -->
+    <module>bsm</module>
+
+    <!-- Standalone Karaf Containers -->
+
+    <!-- Sentinel -->
+    <module>sentinel</module>
+
+    <!-- Minion -->
+    <module>minion</module>
+    <module>scv</module>
+
+    <!-- ReST Elasticsearch Integration -->
+    <module>opennms-es-rest</module>
+
+    <!-- Correlation Feedback -->
+    <module>situation-feedback</module>
+
+    <!-- Event Integration Facility Adapter -->
+    <module>eif-adapter</module>
+
+    <module>jest</module>
+    <module>dnsresolver</module>
+    <module>perspectivepoller</module>
+    <module>openconfig</module>
+    <module>ui-extension</module>
+    <!-- Configuration Manager -->
+    <module>config</module>
+
+    <!-- Usage Analytics -->
+    <module>usageanalytics</module>
+    
+    <module>inmemory-timeseries-plugin</module>
+    
+    <module>grpc</module>
+    <module>elastic</module>
+  </modules>
+</project>
