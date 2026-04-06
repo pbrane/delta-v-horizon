@@ -12,7 +12,7 @@
   <packaging>pom</packaging>
   <modules>
     <module>common</module>
-    <module>core</module>
+    <!-- core removed: depends on topology-map/topology.api (deleted container bridge deps) -->
     <module>dao-common</module>
     <module>minion</module>
     <module>sentinel</module>

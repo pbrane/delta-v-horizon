@@ -74,6 +74,9 @@
     <!-- OpenNMS rest provider module -->
     <module>rest-provider</module>
 
+    <!-- OSGi Script Engine (clean — only depends on osgi.core from Maven Central) -->
+    <module>osgi-jsr223</module>
+
     <!-- JMX config generator -->
     <module>jmx-config-generator</module>
 
@@ -129,8 +132,7 @@
     <module>minion</module>
     <module>scv</module>
 
-    <!-- ReST Elasticsearch Integration -->
-    <module>opennms-es-rest</module>
+    <!-- opennms-es-rest removed: depends on opennms-osgi-core (deleted container bridge deps) -->
 
     <!-- Correlation Feedback -->
     <module>situation-feedback</module>
@@ -142,7 +144,7 @@
     <module>dnsresolver</module>
     <module>perspectivepoller</module>
     <module>openconfig</module>
-    <module>ui-extension</module>
+    <!-- ui-extension removed: depends on api-layer.core (topology.api chain) -->
     <!-- Configuration Manager -->
     <module>config</module>
 

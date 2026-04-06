@@ -15,8 +15,8 @@
         <module>application</module>
         <module>bsm</module>
         <module>graphml</module>
-        <module>legacy</module>
+        <!-- legacy and topology removed: depend on features/topology-map/topology.api
+             which has deleted container/bridge dependencies. No daemon-boot uses these. -->
         <module>persistence-test</module>
-        <module>topology</module>
     </modules>
 </project>

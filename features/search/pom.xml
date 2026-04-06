@@ -13,7 +13,7 @@
   <modules>
     <module>api</module>
     <module>providers</module>
-    <module>rest</module>
+    <!-- rest removed: depends on api-layer.core + ui-extension (topology.api chain) -->
     <module>service</module>
   </modules>
   <dependencies>
