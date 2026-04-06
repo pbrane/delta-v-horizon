@@ -26,7 +26,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.opennms</groupId>
   <artifactId>opennms</artifactId>
-  <version>1.0.0</version>
+  <version>1.0.1</version>
   <packaging>pom</packaging>
   <name>Delta-V Horizon</name>
   <url>https://github.com/pbrane/delta-v-horizon</url>
@@ -785,7 +785,7 @@
       <plugin>
         <groupId>org.eclipse.m2e</groupId>
         <artifactId>lifecycle-mapping</artifactId>
-        <version>1.0.0</version>
+        <version>1.0.1</version>
         <configuration>
           <lifecycleMappingMetadata>
             <pluginExecutions>
@@ -4150,7 +4150,7 @@
       <dependency>
         <groupId>com.googlecode.concurrent-locks</groupId>
         <artifactId>concurrent-locks</artifactId>
-        <version>1.0.0</version>
+        <version>1.0.1</version>
       </dependency>
       <dependency>
         <groupId>com.google.errorprone</groupId>
