@@ -308,7 +308,7 @@
     <dependency>
       <groupId>org.ebaysf.web</groupId>
       <artifactId>cors-filter</artifactId>
-      <version>1.0.2</version>
+      <version>1.0.1</version>
     </dependency>
 
     <!-- test dependencies -->
