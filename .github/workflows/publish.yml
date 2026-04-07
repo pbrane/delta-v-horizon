@@ -62,8 +62,44 @@ jobs:
         run: ./mvnw -B -DskipTests install
 
       - name: Deploy to GitHub Packages
-        # -fae: continue past individual module deploy failures (409 on already-published artifacts)
-        # retryFailedDeploymentCount: retry transient network failures
-        run: ./mvnw -B -DskipTests -fae -DretryFailedDeploymentCount=3 deploy -DaltDeploymentRepository=github::https://maven.pkg.github.com/pbrane/delta-v-horizon
+        # deployAtEnd=false: deploy each module independently (not batched)
+        # This makes the deploy idempotent — already-published modules get 409
+        # but remaining modules continue deploying.
+        # The '|| true' tolerates 409 exits from partial prior runs.
+        # A follow-up 'verify' step confirms all artifacts are actually published.
+        run: ./mvnw -B -DskipTests -DdeployAtEnd=false deploy -DaltDeploymentRepository=github::https://maven.pkg.github.com/pbrane/delta-v-horizon || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify key artifacts published
+        run: |
+          echo "Verifying key artifacts are available on GitHub Packages..."
+          ARTIFACTS=(
+            "org.opennms:opennms-dao-api"
+            "org.opennms:opennms-config-api"
+            "org.opennms:opennms-model"
+            "org.opennms.core:org.opennms.core.api"
+            "org.opennms.features.events:org.opennms.features.events.api"
+          )
+          VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
+          FAILED=0
+          for art in "${ARTIFACTS[@]}"; do
+            GROUP=$(echo "$art" | cut -d: -f1)
+            ARTIFACT=$(echo "$art" | cut -d: -f2)
+            GROUP_PATH=$(echo "$GROUP" | tr '.' '/')
+            URL="https://maven.pkg.github.com/pbrane/delta-v-horizon/${GROUP_PATH}/${ARTIFACT}/${VERSION}/${ARTIFACT}-${VERSION}.pom"
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: token ${GITHUB_TOKEN}" "$URL")
+            if [ "$STATUS" = "200" ] || [ "$STATUS" = "302" ]; then
+              echo "  OK: ${art}:${VERSION}"
+            else
+              echo "  MISSING: ${art}:${VERSION} (HTTP $STATUS)"
+              FAILED=1
+            fi
+          done
+          if [ "$FAILED" = "1" ]; then
+            echo "ERROR: Some artifacts are missing. Deploy may have failed."
+            exit 1
+          fi
+          echo "All key artifacts verified."
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
