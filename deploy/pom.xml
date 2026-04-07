@@ -3,7 +3,7 @@
   <parent>
     <groupId>org.opennms</groupId>
     <artifactId>opennms</artifactId>
-    <version>1.0.1</version>
+    <version>1.0.2</version>
   </parent>
   <modelVersion>4.0.0</modelVersion>
   <artifactId>opennms-deploy</artifactId>
@@ -100,7 +100,7 @@
       <plugin>
         <groupId>org.simplify4u.plugins</groupId>
         <artifactId>sign-maven-plugin</artifactId>
-        <version>1.0.1</version>
+        <version>1.0.2</version>
         <executions>
           <execution>
             <id>sign-artifacts</id>

@@ -3,7 +3,7 @@
   <parent>
     <artifactId>opennms</artifactId>
     <groupId>org.opennms</groupId>
-    <version>1.0.1</version>
+    <version>1.0.2</version>
   </parent>
   <modelVersion>4.0.0</modelVersion>
   <artifactId>opennms-webapp-rest</artifactId>
@@ -308,7 +308,7 @@
     <dependency>
       <groupId>org.ebaysf.web</groupId>
       <artifactId>cors-filter</artifactId>
-      <version>1.0.1</version>
+      <version>1.0.2</version>
     </dependency>
 
     <!-- test dependencies -->

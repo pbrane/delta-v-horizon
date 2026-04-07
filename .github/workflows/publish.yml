@@ -62,6 +62,8 @@ jobs:
         run: ./mvnw -B -DskipTests install
 
       - name: Deploy to GitHub Packages
-        run: ./mvnw -B -DskipTests deploy -DaltDeploymentRepository=github::https://maven.pkg.github.com/pbrane/delta-v-horizon
+        # -fae: continue past individual module deploy failures (409 on already-published artifacts)
+        # retryFailedDeploymentCount: retry transient network failures
+        run: ./mvnw -B -DskipTests -fae -DretryFailedDeploymentCount=3 deploy -DaltDeploymentRepository=github::https://maven.pkg.github.com/pbrane/delta-v-horizon
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
