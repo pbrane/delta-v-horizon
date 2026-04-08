@@ -90,8 +90,10 @@ public class PerspectivePollJob implements Job {
 
                             @Override
                             public Void onTimedOut(final Throwable t) {
-                                LOG.warn("RPC timed out for {}", svc);
-                                backend.reportResult(svc, PollStatus.unavailable("RPC timed out"));
+                                // RPC timeout = infrastructure problem (Minion unreachable),
+                                // NOT a service problem. Do NOT report as Unavailable —
+                                // that would create false perspective outages.
+                                LOG.warn("RPC timed out for {} — infrastructure issue, not reporting as service outage", svc);
                                 return null;
                             }
 
