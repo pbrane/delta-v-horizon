@@ -28,8 +28,7 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import org.opennms.core.rpc.api.RpcExceptionHandler;
 import org.opennms.core.rpc.api.RpcExceptionUtils;
 import org.opennms.core.tracing.api.TracerConstants;
-import org.opennms.netmgt.config.poller.Parameter;
-import org.opennms.netmgt.config.poller.Service;
+import org.opennms.netmgt.poller.PollStatus;
 import org.quartz.Job;
 import org.quartz.JobDataMap;
 import org.quartz.JobExecutionContext;
@@ -91,19 +90,22 @@ public class PerspectivePollJob implements Job {
 
                             @Override
                             public Void onTimedOut(final Throwable t) {
-                                LOG.warn("RPC timed out.", t);
+                                LOG.warn("RPC timed out for {}", svc);
+                                backend.reportResult(svc, PollStatus.unavailable("RPC timed out"));
                                 return null;
                             }
 
                             @Override
                             public Void onRejected(final Throwable t) {
-                                LOG.warn("Rejected call.", t);
+                                LOG.warn("Rejected call for {}", svc);
+                                backend.reportResult(svc, PollStatus.unavailable("RPC rejected"));
                                 return null;
                             }
 
                             @Override
                             public Void onUnknown(final Throwable t) {
-                                LOG.warn("Unknown exception.", t);
+                                LOG.warn("Unknown exception polling {}", svc, t);
+                                backend.reportResult(svc, PollStatus.unavailable("RPC error: " + t.getMessage()));
                                 return null;
                             }
                         });
