@@ -48,15 +48,17 @@ jobs:
           cache: maven
 
       - name: Validate tag matches POM version
+        if: github.event_name == 'push'
         env:
           TAG_VERSION: ${{ github.ref_name }}
         run: |
-          POM_VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
+          POM_VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout || grep '<version>' pom.xml | head -1 | sed 's/.*<version>//;s/<.*//')
+          echo "POM version: $POM_VERSION, Tag: $TAG_VERSION"
           if [ "$POM_VERSION" != "$TAG_VERSION" ]; then
             echo "ERROR: POM version ($POM_VERSION) does not match tag ($TAG_VERSION)"
             exit 1
           fi
-          echo "Version: $POM_VERSION"
+          echo "Version validated: $POM_VERSION"
 
       - name: Build all modules
         run: ./mvnw -B -DskipTests install
