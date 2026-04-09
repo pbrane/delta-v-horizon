@@ -42,10 +42,12 @@ import org.opennms.netmgt.dao.api.AssetRecordDao;
 import org.opennms.netmgt.dao.api.HwEntityDao;
 import org.opennms.netmgt.dao.api.IpInterfaceDao;
 import org.opennms.netmgt.dao.api.NodeDao;
+import org.opennms.netmgt.dao.api.SnmpInterfaceDao;
 import org.opennms.netmgt.model.OnmsAssetRecord;
 import org.opennms.netmgt.model.OnmsHwEntity;
 import org.opennms.netmgt.model.OnmsIpInterface;
 import org.opennms.netmgt.model.OnmsNode;
+import org.opennms.netmgt.model.OnmsSnmpInterface;
 import org.opennms.netmgt.xml.event.Event;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,6 +65,8 @@ public class EventUtilDaoImpl extends AbstractEventUtil {
 
 	private final IpInterfaceDao ipInterfaceDao;
 
+	private final SnmpInterfaceDao snmpInterfaceDao;
+
     private final HwEntityDao hwEntityDao;
 
 	private final Pattern ASSET_PARM_PATTERN = Pattern.compile("^asset\\[(.*)\\]$");
@@ -76,8 +80,9 @@ public class EventUtilDaoImpl extends AbstractEventUtil {
     public EventUtilDaoImpl(NodeDao nodeDao,
                             AssetRecordDao assetRecordDao,
                             IpInterfaceDao ipInterfaceDao,
+                            SnmpInterfaceDao snmpInterfaceDao,
                             HwEntityDao hwEntityDao) {
-        this(null, null, nodeDao, assetRecordDao, ipInterfaceDao, hwEntityDao);
+        this(null, null, nodeDao, assetRecordDao, ipInterfaceDao, snmpInterfaceDao, hwEntityDao);
     }
 
     public EventUtilDaoImpl(MetricRegistry registry,
@@ -85,11 +90,13 @@ public class EventUtilDaoImpl extends AbstractEventUtil {
                             NodeDao nodeDao,
                             AssetRecordDao assetRecordDao,
                             IpInterfaceDao ipInterfaceDao,
+                            SnmpInterfaceDao snmpInterfaceDao,
                             HwEntityDao hwEntityDao) {
         super(registry, transactionOperations);
         this.nodeDao = nodeDao;
         this.assetRecordDao = assetRecordDao;
         this.ipInterfaceDao = ipInterfaceDao;
+        this.snmpInterfaceDao = snmpInterfaceDao;
         this.hwEntityDao = hwEntityDao;
     }
 
@@ -136,6 +143,15 @@ public class EventUtilDaoImpl extends AbstractEventUtil {
         } else {
             return null;
         }
+    }
+
+    @Override
+    public String getIfAliasByNodeAndIfIndex(long nodeId, int ifIndex) {
+        OnmsSnmpInterface snmpIface = snmpInterfaceDao.findByNodeIdAndIfIndex((int)nodeId, ifIndex);
+        if (snmpIface != null && snmpIface.getIfAlias() != null) {
+            return snmpIface.getIfAlias();
+        }
+        return null;
     }
 
     @Override
