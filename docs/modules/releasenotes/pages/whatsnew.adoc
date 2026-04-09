@@ -5,7 +5,7 @@
 == System requirements and Dependencies ==
 
 * Java 17: Horizon 35 requires JDK 17.
-* PostgreSQL 13 or higher: This version of Horizon requires a supported version of PostgreSQL.
+* PostgreSQL 13 or higher: This version of Horizon requires a supported version of PostgreSQL from 13 up to (and including) 18.
 * Elasticsearch: Horizon 35 requires Elasticsearch 8 for flow processing.
 
 == New features and important changes
