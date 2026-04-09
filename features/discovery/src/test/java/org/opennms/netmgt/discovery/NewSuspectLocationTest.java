@@ -56,7 +56,7 @@ public class NewSuspectLocationTest {
 
         m_eventExpander = new EventExpander(new MetricRegistry());
         m_eventExpander.setEventConfDao(m_eventConfDao);
-        m_eventExpander.setEventUtil(new EventUtilDaoImpl(null, null, null, null));
+        m_eventExpander.setEventUtil(new EventUtilDaoImpl(null, null, null, null, null));
         m_eventExpander.afterPropertiesSet();
     }
 
