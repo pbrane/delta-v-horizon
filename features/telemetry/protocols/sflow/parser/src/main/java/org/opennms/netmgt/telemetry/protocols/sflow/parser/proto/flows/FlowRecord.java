@@ -104,7 +104,7 @@ public class FlowRecord extends Record<FlowData> {
     @Override
     public void visit(SampleDatagramVisitor visitor) {
         visitor.accept(this);
-        if (this.data != null) {
+        if (this.data != null && this.data.value != null) {
             this.data.value.visit(visitor);
         }
     }
