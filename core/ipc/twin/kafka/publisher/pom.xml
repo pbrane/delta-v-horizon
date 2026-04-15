@@ -60,5 +60,10 @@
             <artifactId>rate-limited-logger</artifactId>
             <version>${rateLimitedLoggerVersion}</version>
         </dependency>
+        <dependency>
+            <groupId>org.opennms.dependencies</groupId>
+            <artifactId>spring-dependencies</artifactId>
+            <type>pom</type>
+        </dependency>
     </dependencies>
 </project>
