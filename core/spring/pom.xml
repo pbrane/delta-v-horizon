@@ -25,6 +25,7 @@
       <groupId>org.opennms.dependencies</groupId>
       <artifactId>spring-dependencies</artifactId>
       <type>pom</type>
+      <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>org.slf4j</groupId>
