@@ -27,7 +27,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
 
 import org.opennms.core.cache.Cache;
 import org.opennms.integration.api.v1.timeseries.Tag;
@@ -90,8 +89,15 @@ public class TimeseriesPersister extends AbstractPersister {
     @Override
     public void visitResource(CollectionResource resource) {
         super.visitResource(resource);
-        // compute user defined meta data for this resource
-        this.configuredAdditionalMetaTagCache.put(resource.getPath(), metaDataLoader.load(resource));
+        // Meta-tags are enrichment, not required for sample persistence. Swallow
+        // loader failures (e.g. transaction rollback in MetaTagDataLoader) so the
+        // rest of the visit chain proceeds; getUserDefinedMetaTags falls back to
+        // an empty set on cache miss.
+        try {
+            this.configuredAdditionalMetaTagCache.put(resource.getPath(), metaDataLoader.load(resource));
+        } catch (RuntimeException e) {
+            LOG.warn("Failed to load meta-tags for {}; continuing without meta-tags", resource.getPath(), e);
+        }
         this.resourceLevelStringAttributes = Maps.newLinkedHashMap();
         this.allBuilders = new ArrayList<>();
     }
@@ -115,12 +121,14 @@ public class TimeseriesPersister extends AbstractPersister {
     }
 
     private Set<Tag> getUserDefinedMetaTags(final CollectionResource resource) {
-        try {
-            return configuredAdditionalMetaTagCache.get(resource.getPath());
-        } catch (ExecutionException e) {
-            LOG.warn("An exception occurred while trying to retrieve meta tags for {}", resource.getPath(), e);
-        }
-        return Collections.emptySet();
+        // getIfCached avoids invoking the CacheLoader on a miss. The loader
+        // (MetaTagDataLoader) is typed on CollectionResource, but this cache is
+        // keyed by ResourcePath — a miss would call the loader's bridge method
+        // and ClassCastException through type erasure. The cache is populated
+        // proactively in visitResource; a miss here means that population failed
+        // and we should proceed without meta-tags rather than re-throw.
+        final Set<Tag> cached = configuredAdditionalMetaTagCache.getIfCached(resource.getPath());
+        return cached != null ? cached : Collections.emptySet();
     }
 
     /**
@@ -128,6 +136,10 @@ public class TimeseriesPersister extends AbstractPersister {
      */
     @Override
     protected void persistStringAttribute(ResourcePath path, String key, String value) throws PersistException {
+        if (currentBuilder == null) {
+            LOG.debug("Skipping string attribute {}={} at {} — no builder for the current group", key, value, path);
+            return;
+        }
         currentBuilder.persistStringAttribute(path, key, value);
     }
 
@@ -156,6 +168,12 @@ public class TimeseriesPersister extends AbstractPersister {
      */
     @Override // Override to implement our own string attribute handling
     public void persistNumericAttribute(CollectionAttribute attribute) {
+        if (currentBuilder == null) {
+            // Reached when visitGroup was skipped (shouldPersist=false) or threw
+            // before assigning currentBuilder. Drop the attribute rather than NPE.
+            LOG.debug("Skipping {} — no builder for the current group", attribute);
+            return;
+        }
         boolean shouldIgnorePersist = isIgnorePersist() && AttributeType.COUNTER.equals(attribute.getType());
         LOG.trace("Persisting {} {}", attribute, (shouldIgnorePersist ? ". Ignoring value because of sysUpTime changed." : ""));
         Number value = shouldIgnorePersist ? Double.NaN : attribute.getNumericValue();
