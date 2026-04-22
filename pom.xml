@@ -604,7 +604,13 @@
         <artifactId>maven-deploy-plugin</artifactId>
         <version>3.1.1</version>
         <configuration>
-          <deployAtEnd>true</deployAtEnd>
+          <!-- Per-module deploy (not batched-at-end). With a 681-module reactor
+               deploying to GitHub Packages, one 409 (re-upload attempt on an
+               already-published artifact) aborts the rest of a batched deploy.
+               Per-module deploy + `-fae` in the publish workflow lets a 409 on
+               one module fail only that module while the others continue.
+               Expression allows CI override via -DdeployAtEnd=true if needed. -->
+          <deployAtEnd>${deployAtEnd}</deployAtEnd>
           <retryFailedDeploymentCount>2</retryFailedDeploymentCount>
         </configuration>
       </plugin>
@@ -1568,6 +1574,12 @@
   </reporting>
 
   <properties>
+    <!-- Default for maven-deploy-plugin's deployAtEnd. Overridable via
+         -DdeployAtEnd=true on the CLI when batching is wanted. Per-module
+         deploy is the default because GitHub Packages 409s on re-upload and
+         batched deploys abort after the first 409, abandoning remaining
+         modules. See the maven-deploy-plugin <configuration> block below. -->
+    <deployAtEnd>false</deployAtEnd>
     <enforcer-skip-maven>false</enforcer-skip-maven>
     <enforcer-skip-banned-dependencies>false</enforcer-skip-banned-dependencies>
     <!-- we have a lot of work to do before this is possible -->
