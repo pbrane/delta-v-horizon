@@ -111,7 +111,7 @@ public class TimeseriesPersisterTest {
      * loader is never invoked from the persister's read path.
      */
     @Test
-    public void visitGroupDoesNotInvokeLoaderOnCacheMiss() {
+    public void visitGroupDoesNotInvokeLoaderOnCacheMiss() throws Exception {
         CollectionResource resource = mock(CollectionResource.class);
         when(resource.getPath()).thenReturn(ResourcePath.get("node", "1"));
         when(resource.shouldPersist(any())).thenReturn(true);
