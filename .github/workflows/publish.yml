@@ -106,8 +106,7 @@ jobs:
             "org.opennms:opennms-rrd-api"
             "org.opennms:opennms"
             "org.opennms:org.opennms.core"
-            "org.opennms:opennms-core"
-            "org.opennms:opennms-dependencies"
+            "org.opennms:dependencies"
           )
           VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
           FAILED=0
