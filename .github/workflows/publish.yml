@@ -64,16 +64,29 @@ jobs:
         run: ./mvnw -B -DskipTests install
 
       - name: Deploy to GitHub Packages
-        # deployAtEnd=false: deploy each module independently (not batched)
-        # This makes the deploy idempotent — already-published modules get 409
-        # but remaining modules continue deploying.
-        # The '|| true' tolerates 409 exits from partial prior runs.
-        # A follow-up 'verify' step confirms all artifacts are actually published.
-        run: ./mvnw -B -DskipTests -DdeployAtEnd=false deploy -DaltDeploymentRepository=github::https://maven.pkg.github.com/pbrane/delta-v-horizon || true
+        # `-fae` (fail-at-end): continue building remaining modules after a
+        # module's deploy fails, then report failure at the end. Combined with
+        # the root POM's property-backed <deployAtEnd>${deployAtEnd}</deployAtEnd>
+        # default of false, each module deploys independently — a 409 on one
+        # already-published module does NOT abort the reactor.
+        #
+        # `|| true` remains so the step exit code is tolerant of 409s from
+        # already-published artifacts (a legitimate idempotency concern on
+        # re-runs). The follow-up 'Verify' step enforces correctness by
+        # checking a representative jar + pom-packaged artifact per major
+        # namespace — if a real deploy failure leaves an aggregator POM
+        # unpublished, Verify catches it and exits non-zero.
+        run: ./mvnw -B -fae -DskipTests deploy -DaltDeploymentRepository=github::https://maven.pkg.github.com/pbrane/delta-v-horizon || true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify key artifacts published
+        # Representative check: one jar + one pom-packaged aggregator per
+        # major namespace. Pom-packaged aggregators (e.g., org.opennms.core,
+        # opennms) are load-bearing parent POMs — consumers cannot resolve
+        # any of their child modules without them. A prior regression where
+        # only jars were verified allowed a run to pass with all aggregators
+        # missing; expanded coverage below prevents that.
         run: |
           echo "Verifying key artifacts are available on GitHub Packages..."
           ARTIFACTS=(
@@ -82,6 +95,11 @@ jobs:
             "org.opennms:opennms-model"
             "org.opennms.core:org.opennms.core.api"
             "org.opennms.features.events:org.opennms.features.events.api"
+            "org.opennms:opennms-rrd-api"
+            "org.opennms:opennms"
+            "org.opennms:org.opennms.core"
+            "org.opennms:opennms-core"
+            "org.opennms:opennms-dependencies"
           )
           VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
           FAILED=0
