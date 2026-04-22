@@ -4,7 +4,7 @@
     <parent>
         <groupId>org.opennms</groupId>
         <artifactId>org.opennms.features</artifactId>
-        <version>1.0.12</version>
+        <version>1.0.13</version>
     </parent>
     <groupId>org.opennms.features</groupId>
     <artifactId>inmemory-timeseries-plugin</artifactId>
