@@ -34,7 +34,15 @@ jobs:
   publish:
     name: Build & Publish Maven Artifacts
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 60 minutes was sufficient under deployAtEnd=true (batched uploads with a
+    # single HTTP client session), but per-module deploy (deployAtEnd=false,
+    # required to tolerate 409s via -fae) creates a fresh HTTPS connection per
+    # artifact and pushes total deploy time for the 681-module reactor to
+    # roughly 35-45 minutes on top of ~15 minutes of build. A 60-minute cap
+    # cancelled the 1.0.12 tag-push run at ~59:59 mid-deploy. 120 leaves
+    # generous headroom for a full fresh-version publish and still catches
+    # runaway stalls.
+    timeout-minutes: 120
 
     steps:
       - name: Checkout
