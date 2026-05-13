@@ -42,7 +42,7 @@ jobs:
     # cancelled the 1.0.12 tag-push run at ~59:59 mid-deploy. 120 leaves
     # generous headroom for a full fresh-version publish and still catches
     # runaway stalls.
-    timeout-minutes: 120
+    timeout-minutes: 240
 
     steps:
       - name: Checkout
@@ -84,7 +84,14 @@ jobs:
         # checking a representative jar + pom-packaged artifact per major
         # namespace — if a real deploy failure leaves an aggregator POM
         # unpublished, Verify catches it and exits non-zero.
-        run: ./mvnw -B -fae -DskipTests deploy -DaltDeploymentRepository=github::https://maven.pkg.github.com/pbrane/delta-v-horizon || true
+        # `-T 4`: 4 parallel reactor threads. Each module's deploy still opens
+        # its own HTTPS session (per the deployAtEnd=false design), but 4 run
+        # in parallel — cutting the 2h-50m projection observed on the cancelled
+        # 1.0.14 run to ~45-75 min when GHCR is slow. On a fast day, 4 threads
+        # may saturate GHCR's per-account upload limits but the workflow is
+        # idempotent (409s tolerated via -fae + || true) so over-pressure is
+        # benign.
+        run: ./mvnw -B -T 4 -fae -DskipTests deploy -DaltDeploymentRepository=github::https://maven.pkg.github.com/pbrane/delta-v-horizon || true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
