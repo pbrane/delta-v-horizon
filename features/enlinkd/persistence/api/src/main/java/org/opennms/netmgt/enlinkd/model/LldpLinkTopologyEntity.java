@@ -47,7 +47,7 @@ public class LldpLinkTopologyEntity {
                                   String remportdescr,
                                   String lldpPortId,
                                   LldpUtils.LldpPortIdSubType lldpPortIdSubType, String lldpPortDescr, Integer lldpPortIfindex) {
-        Assert.notNull(remportdescr, "remportdescr must not be null");
+        Assert.notNull(remportdescr, "lldpRemPortDescr must not be null");
         this.id = id;
         this.nodeId = nodeId;
         this.lldpRemChassisId = lldpRemChassisId;
