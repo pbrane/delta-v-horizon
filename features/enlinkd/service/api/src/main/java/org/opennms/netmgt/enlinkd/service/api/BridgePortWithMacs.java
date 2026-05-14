@@ -37,8 +37,8 @@ public class BridgePortWithMacs implements Topology {
     private final Set<String> m_macs;
 
     public BridgePortWithMacs(BridgePort port, Set<String> macs) {
-        Assert.notNull(port);
-        Assert.notNull(macs);
+        Assert.notNull(port, "port must not be null");
+        Assert.notNull(macs, "macs must not be null");
         m_port=port;
         m_macs=macs;
     }

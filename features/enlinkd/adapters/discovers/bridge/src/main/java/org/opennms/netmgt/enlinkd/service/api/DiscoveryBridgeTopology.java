@@ -374,7 +374,7 @@ public class DiscoveryBridgeTopology {
     }
 
     public DiscoveryBridgeTopology(BroadcastDomain domain) {
-        Assert.notNull(domain);
+        Assert.notNull(domain, "domain must not be null");
         m_domain=domain;
     }
         
@@ -477,7 +477,7 @@ public class DiscoveryBridgeTopology {
     }
 
     public  void calculate() {
-        Assert.notNull(m_bridgeFtMapUpdate);
+        Assert.notNull(m_bridgeFtMapUpdate, "bridgeFtMapUpdate must not be null");
         if (LOG.isDebugEnabled()) {
             LOG.debug("calculate: domain\n{}", 
                       m_domain.printTopology());

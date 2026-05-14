@@ -54,7 +54,7 @@ public class BroadcastDomain implements Topology {
                              BridgePort rootport,
                              Set<BridgePortWithMacs> throughset) {
 
-        Assert.notNull(upsegment);
+        Assert.notNull(upsegment, "upsegment must not be null");
         if (!m_topology.contains(upsegment)) {
             return;
         }
