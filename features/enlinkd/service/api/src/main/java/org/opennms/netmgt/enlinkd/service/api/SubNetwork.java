@@ -39,14 +39,14 @@ public class SubNetwork {
     private final Map<Integer, Set<InetAddress>> m_nodeInterfaceMap = new HashMap<>();
 
     public static SubNetwork createSubNetwork(IpInterfaceTopologyEntity ip) throws IllegalArgumentException {
-        Assert.notNull(ip);
+        Assert.notNull(ip, "ipInterfaceTopologyEntity must not be null");
         return createSubNetwork(ip.getNodeId(), ip.getIpAddress(), ip.getNetMask());
     }
 
     public static SubNetwork createSubNetwork(Integer nodeid, InetAddress ip, InetAddress mask) throws IllegalArgumentException {
-        Assert.notNull(ip);
-        Assert.notNull(mask);
-        Assert.notNull(nodeid);
+        Assert.notNull(ip, "ip must not be null");
+        Assert.notNull(mask, "mask must not be null");
+        Assert.notNull(nodeid, "nodeid must not be null");
         return new SubNetwork(nodeid, ip, mask);
     }
 
