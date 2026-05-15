@@ -32,6 +32,7 @@ import static org.opennms.core.tracing.api.TracerConstants.TAG_TIMEOUT;
 
 import java.math.RoundingMode;
 import java.time.Duration;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -51,6 +52,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -59,6 +61,7 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.PartitionInfo;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
@@ -149,6 +152,9 @@ public class KafkaRpcClientFactory implements RpcClientFactory {
     private JmxReporter metricsReporter = null;
     private Integer maxBufferSize = KafkaRpcConstants.MAX_BUFFER_SIZE_CONFIGURED;
     private long defaultTTL = KafkaRpcConstants.DEFAULT_TTL_CONFIGURED;
+    // Upper bound on how long the first RPC request blocks waiting for the response
+    // consumer to join its group and position its offsets. See KafkaConsumerRunner.
+    private static final long CONSUMER_READY_TIMEOUT_MS = 30_000L;
 
 
     @Autowired
@@ -483,6 +489,12 @@ public class KafkaRpcClientFactory implements RpcClientFactory {
         private final Set<String> topics = new HashSet<>();
         private final AtomicBoolean topicAdded = new AtomicBoolean(false);
         private final CountDownLatch firstTopicAdded = new CountDownLatch(1);
+        // Released once the consumer has joined its group and positioned its offsets.
+        // startConsumingForModule() blocks callers on this so an RPC request is never
+        // dispatched before the response consumer can read its reply — otherwise a
+        // fast response lands on the response topic ahead of a latest-reset consumer
+        // and is silently skipped, and the request times out.
+        private final CountDownLatch consumerReady = new CountDownLatch(1);
 
         private KafkaConsumerRunner(KafkaConsumer<String, byte[]> consumer) {
             this.consumer = consumer;
@@ -589,24 +601,56 @@ public class KafkaRpcClientFactory implements RpcClientFactory {
                 synchronized (topics) {
                     // Topic subscriptions are not incremental. This list will replace the current assignment (if there is one).
                     LOG.info("Subscribing Kafka RPC consumer to topics named: {}", topics);
-                    consumer.subscribe(topics);
+                    consumer.subscribe(topics, new ConsumerRebalanceListener() {
+                        @Override
+                        public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+                            // no-op
+                        }
+
+                        @Override
+                        public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+                            // Resolve the fetch position now — this applies auto.offset.reset
+                            // so the consumer is genuinely positioned before startConsumingForModule()
+                            // releases callers to dispatch their requests.
+                            partitions.forEach(consumer::position);
+                            consumerReady.countDown();
+                        }
+                    });
                     topicAdded.set(false);
                 }
             }
         }
 
         private void startConsumingForModule(String moduleId) {
-            if (moduleIdsForTopics.contains(moduleId)) {
-                return;
-            }
-            moduleIdsForTopics.add(moduleId);
-            final String topic = topicProvider.getResponseTopic(moduleId);
-            synchronized (topics) {
-                if (topics.add(topic)) {
-                    topicAdded.set(true);
-                    firstTopicAdded.countDown();
-                    consumer.wakeup();
+            if (!moduleIdsForTopics.contains(moduleId)) {
+                moduleIdsForTopics.add(moduleId);
+                final String topic = topicProvider.getResponseTopic(moduleId);
+                synchronized (topics) {
+                    if (topics.add(topic)) {
+                        topicAdded.set(true);
+                        firstTopicAdded.countDown();
+                        consumer.wakeup();
+                    }
                 }
+            }
+            awaitConsumerReady();
+        }
+
+        /**
+         * Blocks the calling thread until the response consumer has joined its group and
+         * positioned its offsets, so the request {@code getClient().execute()} is about to
+         * send cannot have its response skipped. Only the first call actually waits (~the
+         * group-join latency); later calls return immediately once the latch is open. On
+         * timeout it logs and proceeds rather than failing the request.
+         */
+        private void awaitConsumerReady() {
+            try {
+                if (!consumerReady.await(CONSUMER_READY_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                    LOG.warn("RPC response consumer not ready after {} ms; "
+                            + "responses to requests dispatched now may be missed", CONSUMER_READY_TIMEOUT_MS);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
         }
 
