@@ -21,6 +21,13 @@
       <groupId>com.google.guava</groupId>
       <artifactId>guava</artifactId>
     </dependency>
+    <!-- Unused by this module's own source, but kept: downstream modules
+         (e.g. opennms-provision-persistence) consume javax.validation
+         constraint annotations transitively through this dependency. -->
+    <dependency>
+      <groupId>javax.validation</groupId>
+      <artifactId>validation-api</artifactId>
+    </dependency>
 
     <!-- Test -->
     <dependency>
