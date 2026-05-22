@@ -5,7 +5,7 @@
 == System requirements and Dependencies ==
 
 * Java 17: Horizon 35 requires JDK 17.
-* PostgreSQL 13 or higher: This version of Horizon requires a supported version of PostgreSQL.
+* PostgreSQL 14 or higher: This version of Horizon requires a supported version of PostgreSQL from 14 up to (and including) 18.
 * Elasticsearch: Horizon 35 requires Elasticsearch 8 for flow processing.
 
 == New features and important changes
@@ -38,6 +38,15 @@ OpenConfig telemetry streaming is now supported on Minion. See xref:reference:te
 
 
 == Breaking changes
+
+=== At least PostgreSQL 14.0 is required
+
+OpenNMS {page-component-title} now requires PostgreSQL 14.x or newer.
+If you are running an older version, you must upgrade to PostgreSQL 14 or later.
+Attempting a schema upgrade with `install -dis` will result in an error.
+If upgrading PostgreSQL to at least version 14 isn’t possible and you’re completely blocked, the -Q flag lets you skip the version check.
+Use this only as a last resort, since it may affect compatibility.
+Be aware that doing so takes you beyond supported configurations — here be dragons.
 
 === Debian path updates
 
