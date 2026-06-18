@@ -59,6 +59,7 @@ import org.opennms.netmgt.config.poller.NodeOutage;
 import org.opennms.netmgt.config.poller.Package;
 import org.opennms.netmgt.config.poller.Parameter;
 import org.opennms.netmgt.config.poller.PollerConfiguration;
+import org.opennms.netmgt.config.poller.Rrd;
 import org.opennms.netmgt.config.poller.Service;
 import org.opennms.netmgt.filter.api.FilterDao;
 import org.opennms.netmgt.model.ServiceSelector;
@@ -235,6 +236,10 @@ abstract public class PollerConfigManager implements PollerConfig  {
 
 
     private static final Logger LOG = LoggerFactory.getLogger(PollerConfigManager.class);
+
+    /** Fallback RRD step (seconds) returned by {@link #getStep(Package)} when a package
+     *  has no {@code <rrd>} element. Matches the historical default poller step. */
+    private static final int DEFAULT_RRD_STEP = 300;
 
     private static final XmlMapper XML_MAPPER;
     static {
@@ -988,7 +993,13 @@ abstract public class PollerConfigManager implements PollerConfig  {
     public int getStep(final Package pkg) {
         try {
             getReadLock().lock();
-            return pkg.getRrd().getStep();
+            // A package's <rrd> element is optional: a config may omit it entirely
+            // (e.g. when response-time persistence is disabled, as with a no-op
+            // PersisterFactory). The engine still calls getStep() on the poll
+            // result-storage path, so guard against a null rrd/step rather than NPE
+            // and force every polled service DOWN.
+            final Rrd rrd = pkg.getRrd();
+            return (rrd == null || rrd.getStep() == null) ? DEFAULT_RRD_STEP : rrd.getStep();
         } finally {
             getReadLock().unlock();
         }
@@ -1003,7 +1014,10 @@ abstract public class PollerConfigManager implements PollerConfig  {
     public List<String> getRRAList(final Package pkg) {
         try {
             getReadLock().lock();
-            return pkg.getRrd().getRras();
+            // See getStep(): the <rrd> element is optional; return an empty RRA list
+            // rather than NPE when it is absent.
+            final Rrd rrd = pkg.getRrd();
+            return rrd == null ? Collections.emptyList() : rrd.getRras();
         } finally {
             getReadLock().unlock();
         }
