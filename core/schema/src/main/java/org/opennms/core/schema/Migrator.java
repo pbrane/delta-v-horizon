@@ -72,8 +72,9 @@ public class Migrator {
 
     private static final Logger LOG = LoggerFactory.getLogger(Migrator.class);
     private static final Pattern POSTGRESQL_VERSION_PATTERN = Pattern.compile("^(?:PostgreSQL|EnterpriseDB) (\\d+\\.\\d+)");
-    private static final float POSTGRESQL_MIN_VERSION_INCLUSIVE = Float.parseFloat(System.getProperty("opennms.postgresql.minVersion", "10.0"));
-    private static final float POSTGRESQL_MAX_VERSION_EXCLUSIVE = Float.parseFloat(System.getProperty("opennms.postgresql.maxVersion", "17.0"));
+    private static final float POSTGRESQL_MIN_VERSION_INCLUSIVE = Float.parseFloat(System.getProperty("opennms.postgresql.minVersion", "14.0"));
+    // Opt-in only: unset means no upper bound. When set, the installer rejects versions >= this value.
+    private static final Float POSTGRESQL_MAX_VERSION_EXCLUSIVE = parseOptionalMaxVersion();
 
     private static final String IPLIKE_SQL_RESOURCE = "iplike.sql";
 
@@ -326,15 +327,41 @@ public class Migrator {
             throw new MigrationException("unable to determine database version");
         }
 
-        final String message = String.format(
-                "Unsupported database version \"%f\" -- you need at least %f and less than %f.  "
-                        + "Use the \"-Q\" option to disable this check if you feel brave and are willing "
-                        + "to find and fix bugs found yourself.",
-                        dbv, POSTGRESQL_MIN_VERSION_INCLUSIVE, POSTGRESQL_MAX_VERSION_EXCLUSIVE
-                );
+        checkDatabaseVersionInRange(dbv, POSTGRESQL_MIN_VERSION_INCLUSIVE, POSTGRESQL_MAX_VERSION_EXCLUSIVE);
+    }
 
-        if (dbv < POSTGRESQL_MIN_VERSION_INCLUSIVE || dbv >= POSTGRESQL_MAX_VERSION_EXCLUSIVE) {
-            throw new MigrationException(message);
+    /**
+     * Reads the opt-in maximum-version ceiling from the {@code opennms.postgresql.maxVersion}
+     * system property. Returns {@code null} when the property is unset or blank, meaning no
+     * upper bound is enforced.
+     */
+    static Float parseOptionalMaxVersion() {
+        final String prop = System.getProperty("opennms.postgresql.maxVersion");
+        if (prop == null || prop.trim().isEmpty()) {
+            return null;
+        }
+        return Float.valueOf(prop.trim());
+    }
+
+    /**
+     * Enforces the supported PostgreSQL version range: a hard minimum and an optional ceiling.
+     * Versions below {@code minInclusive} are always rejected. A non-null {@code maxExclusive}
+     * rejects versions at or above it; a null {@code maxExclusive} imposes no upper bound.
+     *
+     * @throws MigrationException if the version is outside the supported range.
+     */
+    static void checkDatabaseVersionInRange(final float dbv, final float minInclusive, final Float maxExclusive) throws MigrationException {
+        final boolean tooOld = dbv < minInclusive;
+        final boolean tooNew = maxExclusive != null && dbv >= maxExclusive;
+        if (tooOld || tooNew) {
+            final String required = maxExclusive == null
+                    ? String.format("at least %.1f", minInclusive)
+                    : String.format("at least %.1f and less than %.1f", minInclusive, maxExclusive);
+            throw new MigrationException(String.format(
+                    "Unsupported database version \"%.1f\" -- you need %s.  "
+                            + "Use the \"-Q\" option to disable this check if you feel brave and are willing "
+                            + "to find and fix bugs found yourself.",
+                    dbv, required));
         }
     }
 

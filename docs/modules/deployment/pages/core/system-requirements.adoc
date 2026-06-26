@@ -88,5 +88,14 @@ Components marked with an asterisk are required:
 | Latest https://www.mozilla.org[Mozilla Firefox] or https://www.google.com/intl/en_us/chrome/[Google Chrome]
 |===
 
+[NOTE]
+====
+The installer requires PostgreSQL {compatible-postgresql} and does not enforce an upper version bound by default, so newer major releases (for example PostgreSQL 18) install without modification.
+Versions newer than those listed above are accepted to support early adopters but may not yet be fully tested—run them in non-critical environments and report any issues.
+
+If you need to pin a maximum version in a critical environment, set the system property `-Dopennms.postgresql.maxVersion=<version>`; the installer then rejects that version and anything newer.
+You can disable the version check entirely with the installer's `-Q` option.
+====
+
 == Containerized environments
 See xref:deployment:core/containers.adoc[containerized deployment] for information on deploying {page-component-title} via Kubernetes or OpenShift.
