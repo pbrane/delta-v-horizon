@@ -22,6 +22,7 @@
 package org.opennms.core.schema;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -51,6 +52,72 @@ public class MigratorTest {
         Migrator migrator = new Migrator();
         migrator.setDatabaseUser(userName);
         assertEquals("opennms",  migrator.getUserForONMSDB());
+    }
+
+    // 3.1 Below the minimum is rejected; at/above the minimum with no ceiling is accepted.
+    @Test
+    public void testVersionBelowMinimumIsRejected() {
+        assertThrows(MigrationException.class,
+                () -> Migrator.checkDatabaseVersionInRange(13.0f, 14.0f, null));
+    }
+
+    @Test
+    public void testVersionAtMinimumWithNoCeilingIsAccepted() throws MigrationException {
+        Migrator.checkDatabaseVersionInRange(14.0f, 14.0f, null);
+    }
+
+    // 3.2 With no ceiling, a new major such as PG 18 is accepted.
+    @Test
+    public void testNewMajorWithNoCeilingIsAccepted() throws MigrationException {
+        Migrator.checkDatabaseVersionInRange(18.0f, 14.0f, null);
+    }
+
+    // 3.3 With an opt-in ceiling of 19.0: 18 accepted, 19 rejected.
+    @Test
+    public void testVersionBelowCeilingIsAccepted() throws MigrationException {
+        Migrator.checkDatabaseVersionInRange(18.0f, 14.0f, 19.0f);
+    }
+
+    @Test
+    public void testVersionAtCeilingIsRejected() {
+        assertThrows(MigrationException.class,
+                () -> Migrator.checkDatabaseVersionInRange(19.0f, 14.0f, 19.0f));
+    }
+
+    // 3.3 The opt-in ceiling is read from the system property; unset means no limit.
+    @Test
+    public void testCeilingUnsetWhenPropertyAbsent() {
+        final String previous = System.getProperty("opennms.postgresql.maxVersion");
+        System.clearProperty("opennms.postgresql.maxVersion");
+        try {
+            assertEquals(null, Migrator.parseOptionalMaxVersion());
+        } finally {
+            if (previous != null) {
+                System.setProperty("opennms.postgresql.maxVersion", previous);
+            }
+        }
+    }
+
+    @Test
+    public void testCeilingParsedWhenPropertySet() {
+        final String previous = System.getProperty("opennms.postgresql.maxVersion");
+        System.setProperty("opennms.postgresql.maxVersion", "19.0");
+        try {
+            assertEquals(Float.valueOf(19.0f), Migrator.parseOptionalMaxVersion());
+        } finally {
+            if (previous != null) {
+                System.setProperty("opennms.postgresql.maxVersion", previous);
+            } else {
+                System.clearProperty("opennms.postgresql.maxVersion");
+            }
+        }
+    }
+
+    // 3.4 Disabling validation skips the version checks entirely (no datasource touched).
+    @Test
+    public void testValidationDisabledSkipsVersionCheck() throws MigrationException {
+        migrator.setValidateDatabaseVersion(false);
+        migrator.validateDatabaseVersion();
     }
 
 }
