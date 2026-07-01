@@ -65,7 +65,7 @@ public class SnmpCollection implements Serializable, Cloneable {
     /**
      * RRD parms
      */
-    @XmlElement(name="rrd", required=true)
+    @XmlElement(name="rrd", required=false)
     private Rrd m_rrd;
 
     /**

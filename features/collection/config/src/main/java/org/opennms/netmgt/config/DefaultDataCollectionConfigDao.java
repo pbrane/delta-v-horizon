@@ -48,6 +48,7 @@ import org.opennms.netmgt.config.datacollection.MibObj;
 import org.opennms.netmgt.config.datacollection.MibObjProperty;
 import org.opennms.netmgt.config.datacollection.MibObject;
 import org.opennms.netmgt.config.datacollection.ResourceType;
+import org.opennms.netmgt.config.datacollection.Rrd;
 import org.opennms.netmgt.config.datacollection.SnmpCollection;
 import org.opennms.netmgt.config.datacollection.SystemDef;
 import org.opennms.netmgt.config.datacollection.SystemDefChoice;
@@ -68,6 +69,14 @@ import org.slf4j.LoggerFactory;
 public class DefaultDataCollectionConfigDao extends AbstractJaxbConfigDao<DatacollectionConfig, DatacollectionConfig> implements DataCollectionConfigDao {
 
     public static final Logger LOG = LoggerFactory.getLogger(DefaultDataCollectionConfigDao.class);
+
+    /**
+     * Default RRD step (seconds) used when a collection declares no {@code <rrd>} block.
+     * RRD config is optional (e.g. Kafka-first deployments persist elsewhere); this default
+     * lets the reader build a valid RrdRepository without a configured step. Mirrors
+     * {@code PollerConfigManager.DEFAULT_RRD_STEP}.
+     */
+    private static final int DEFAULT_RRD_STEP = 300;
 
     private String m_configDirectory;
 
@@ -262,20 +271,36 @@ public class DefaultDataCollectionConfigDao extends AbstractJaxbConfigDao<Dataco
     @Override
     public int getStep(final String collectionName) {
         final SnmpCollection collection = getSnmpCollection(getContainer(), collectionName);
-        return collection == null ? -1 : collection.getRrd().getStep();
+        if (collection == null) {
+            return -1; // collection not found (distinct from a found collection with no <rrd>)
+        }
+        final Rrd rrd = collection.getRrd();
+        return rrd == null ? DEFAULT_RRD_STEP : rrd.getStep();
     }
 
     @Override
     public List<String> getRRAList(final String collectionName) {
         final SnmpCollection collection = getSnmpCollection(getContainer(), collectionName);
-        return collection == null ? null : collection.getRrd().getRras();
+        if (collection == null) {
+            return null; // collection not found
+        }
+        final Rrd rrd = collection.getRrd();
+        return rrd == null ? Collections.emptyList() : rrd.getRras();
     }
 
     @Override
     public String getRrdPath() {
         final String rrdPath = getContainer().getObject().getRrdRepository();
         if (rrdPath == null) {
-            throw new RuntimeException("Configuration error, failed to retrieve path to RRD repository.");
+            // rrdRepository is optional (e.g. Kafka-first deployments persist elsewhere).
+            // Return a non-null default rather than throwing. The timeseries path consumes
+            // only the leaf segment ("snmp"). An RRD deployment that set rrd.base.dir gets
+            // the conventional ${rrd.base.dir}/snmp; when it is unset we return the relative
+            // "snmp" — never new File("", "snmp"), which resolves to the filesystem root "/snmp".
+            final String rrdBaseDir = System.getProperty("rrd.base.dir");
+            return (rrdBaseDir == null || rrdBaseDir.isEmpty())
+                    ? "snmp"
+                    : new File(rrdBaseDir, "snmp").getPath();
         }
 
         if (rrdPath.endsWith(File.separator)) {
